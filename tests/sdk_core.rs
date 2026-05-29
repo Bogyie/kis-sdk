@@ -4,8 +4,15 @@ use axum::{
     Json, Router,
 };
 use kis_sdk::{
-    apis::domestic_stock::{
-        CashOrderRequest, CashOrderSide, InquireBalanceRequest, InquirePriceRequest,
+    apis::{
+        bond::{
+            self, BOND_QUOTATION_OPERATIONS, BOND_REALTIME_TRYITOUT_OPERATIONS,
+            BOND_TRADING_ACCOUNT_OPERATIONS,
+        },
+        domestic_stock::{
+            CashOrderRequest, CashOrderSide, InquireBalanceRequest, InquirePriceRequest,
+        },
+        domestic_stock_realtime::{self, DOMESTIC_STOCK_REALTIME_TRYITOUT_OPERATIONS},
     },
     config::Environment,
     credentials::{Account, AppCredentials, SecretString},
@@ -95,6 +102,155 @@ fn inventory_operation_kind_uses_contract_kind_not_http_method_only() {
     assert_eq!(balance.operation_kind, OperationKind::Read);
 }
 
+#[test]
+fn domestic_realtime_and_bond_domain_operations_cover_target_inventory_collections() {
+    let catalog = InventoryCatalog::bundled().expect("inventory catalog builds");
+
+    assert_domain_operations(
+        &catalog,
+        "[국내주식] 실시간시세",
+        &DOMESTIC_STOCK_REALTIME_TRYITOUT_OPERATIONS,
+        29,
+    );
+    assert_domain_operations(
+        &catalog,
+        "[장내채권] 주문/계좌",
+        &BOND_TRADING_ACCOUNT_OPERATIONS,
+        7,
+    );
+    assert_domain_operations(
+        &catalog,
+        "[장내채권] 기본시세",
+        &BOND_QUOTATION_OPERATIONS,
+        8,
+    );
+    assert_domain_operations(
+        &catalog,
+        "[장내채권] 실시간시세",
+        &BOND_REALTIME_TRYITOUT_OPERATIONS,
+        3,
+    );
+}
+
+#[tokio::test]
+async fn domestic_stock_realtime_tryitout_api_calls_mock_contract_endpoint() {
+    let server = MockServer::start().await.expect("mock server starts");
+    let client = KisClient::builder(Environment::Mock)
+        .base_url(server.base_url())
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let response = client
+        .execute_domestic_stock_realtime_tryitout::<serde_json::Value>(
+            domestic_stock_realtime::REALTIME_TRADE_KRX,
+            InventoryRequest::new()
+                .header("approval_key", "test_approval_key")
+                .header("tr_type", "1")
+                .body(json!({
+                    "tr_id": "H0STCNT0",
+                    "tr_key": "005930"
+                })),
+        )
+        .await
+        .expect("domestic realtime tryitout succeeds against mock");
+
+    assert!(response.is_success());
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn domain_wrappers_reject_operations_from_other_collections_before_network() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_bond_quotation::<serde_json::Value>(
+            domestic_stock_realtime::REALTIME_TRADE_KRX,
+            InventoryRequest::new(),
+        )
+        .await
+        .expect_err("wrong collection should fail locally");
+
+    assert!(matches!(error, KisError::Validation(_)));
+}
+
+#[tokio::test]
+async fn bond_domain_apis_preserve_inventory_validation_and_safety_guards() {
+    let read_client = KisClient::builder(Environment::Real)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let missing_query_error = read_client
+        .execute_bond_quotation::<serde_json::Value>(
+            bond::INQUIRE_PRICE,
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "B"
+            })),
+        )
+        .await
+        .expect_err("missing required bond query field should fail locally");
+    assert!(matches!(missing_query_error, KisError::Validation(_)));
+
+    let mock_client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let unsupported_mock_error = mock_client
+        .execute_bond_realtime_tryitout::<serde_json::Value>(
+            bond::REALTIME_TRADE,
+            InventoryRequest::new()
+                .header("approval_key", "test_approval_key")
+                .header("tr_type", "1")
+                .body(json!({
+                    "tr_id": "H0BJCNT0",
+                    "tr_key": "KR103502GA34"
+                })),
+        )
+        .await
+        .expect_err("real-only bond realtime endpoint should not run against mock");
+    assert!(matches!(
+        unsupported_mock_error,
+        KisError::UnsupportedEnvironment { .. }
+    ));
+
+    let live_trading_error = read_client
+        .execute_bond_trading_account::<serde_json::Value>(
+            bond::BUY_ORDER,
+            InventoryRequest::new().body(json!({
+                "ACNT_PRDT_CD": "01",
+                "BOND_ORD_UNPR": "10000",
+                "BOND_RTL_MKET_YN": "N",
+                "CANO": "12345678",
+                "CTAC_TLNO": "01000000000",
+                "IDCR_STFNO": "",
+                "MGCO_APTM_ODNO": "",
+                "ORD_QTY2": "1",
+                "ORD_SVR_DVSN_CD": "0",
+                "PDNO": "KR103502GA34",
+                "SAMT_MKET_PTCI_YN": "N"
+            })),
+        )
+        .await
+        .expect_err("real bond order should be blocked before network");
+    assert!(matches!(
+        live_trading_error,
+        KisError::LiveTradingDisabled { .. }
+    ));
+}
+
 #[tokio::test]
 async fn inventory_execute_calls_mocked_endpoint_by_operation_id() {
     let server = MockServer::start().await.expect("mock server starts");
@@ -120,6 +276,29 @@ async fn inventory_execute_calls_mocked_endpoint_by_operation_id() {
     assert!(response.output.is_some());
 
     server.shutdown().await;
+}
+
+fn assert_domain_operations(
+    catalog: &InventoryCatalog,
+    collection_name: &str,
+    operations: &[&str],
+    expected_count: usize,
+) {
+    assert_eq!(operations.len(), expected_count);
+
+    let inventory_count = catalog
+        .endpoints()
+        .iter()
+        .filter(|endpoint| endpoint.collection_name == collection_name)
+        .count();
+    assert_eq!(inventory_count, expected_count);
+
+    for operation_id in operations {
+        let endpoint = catalog
+            .endpoint(operation_id)
+            .unwrap_or_else(|| panic!("{operation_id} must exist in inventory catalog"));
+        assert_eq!(endpoint.collection_name, collection_name);
+    }
 }
 
 #[tokio::test]
