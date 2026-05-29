@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use crate::{
     config::{Environment, KisConfig},
     credentials::AppCredentials,
-    endpoint::{EndpointSpec, OperationKind, PreparedRequest},
+    endpoint::{EndpointSpec, InventoryCatalog, InventoryRequest, OperationKind, PreparedRequest},
     error::KisError,
     fallback::FallbackPolicy,
     retry::RetryPolicy,
@@ -139,11 +139,61 @@ impl KisClient {
         T: DeserializeOwned,
     {
         let request = endpoint.prepare(self.config.environment, query, body, tr_id_override)?;
+        let fallback_request =
+            if self.should_fallback_to_mock(endpoint.operation_kind, request.method.as_str()) {
+                Some(endpoint.prepare(Environment::Mock, query, body, tr_id_override)?)
+            } else {
+                None
+            };
+        self.execute_prepared(
+            endpoint.id,
+            endpoint.operation_kind,
+            request,
+            fallback_request,
+        )
+        .await
+    }
+
+    pub async fn execute_inventory<T>(
+        &self,
+        operation_id: &str,
+        request: InventoryRequest,
+    ) -> Result<KisEnvelope<T>, KisError>
+    where
+        T: DeserializeOwned,
+    {
+        let catalog = InventoryCatalog::bundled()?;
+        let (operation_kind, prepared) =
+            catalog.prepare(operation_id, self.config.environment, &request)?;
+        let fallback_request =
+            if self.should_fallback_to_mock(operation_kind, prepared.method.as_str()) {
+                Some(
+                    catalog
+                        .prepare(operation_id, Environment::Mock, &request)?
+                        .1,
+                )
+            } else {
+                None
+            };
+        self.execute_prepared(operation_id, operation_kind, prepared, fallback_request)
+            .await
+    }
+
+    async fn execute_prepared<T>(
+        &self,
+        endpoint_id: &str,
+        operation_kind: OperationKind,
+        request: PreparedRequest,
+        fallback_request: Option<PreparedRequest>,
+    ) -> Result<KisEnvelope<T>, KisError>
+    where
+        T: DeserializeOwned,
+    {
         if self.config.environment == Environment::Real
-            && endpoint.operation_kind == OperationKind::TradingMutation
+            && operation_kind == OperationKind::TradingMutation
         {
             return Err(KisError::LiveTradingDisabled {
-                endpoint: endpoint.id.to_string(),
+                endpoint: endpoint_id.to_string(),
             });
         }
 
@@ -151,7 +201,7 @@ impl KisClient {
         loop {
             let result = self
                 .send_prepared(
-                    endpoint.operation_kind,
+                    operation_kind,
                     &request,
                     &self.config.base_url,
                     CredentialScope::Primary,
@@ -165,7 +215,7 @@ impl KisClient {
                 Err(error)
                     if self.config.retry_policy.should_retry(
                         request.method.as_str(),
-                        endpoint.operation_kind,
+                        operation_kind,
                         &error,
                         attempt,
                     ) =>
@@ -175,16 +225,12 @@ impl KisClient {
                         tokio::time::sleep(self.config.retry_policy.backoff()).await;
                     }
                 }
-                Err(error)
-                    if error.retryable()
-                        && self.should_fallback_to_mock(endpoint, request.method.as_str()) =>
-                {
-                    let fallback_request =
-                        endpoint.prepare(Environment::Mock, query, body, tr_id_override)?;
+                Err(error) if error.retryable() && fallback_request.is_some() => {
+                    let fallback_request = fallback_request.as_ref().expect("checked is_some");
                     let mut response = self
                         .send_prepared(
-                            endpoint.operation_kind,
-                            &fallback_request,
+                            operation_kind,
+                            fallback_request,
                             &self.config.fallback_base_url,
                             CredentialScope::Fallback,
                         )
@@ -203,13 +249,13 @@ impl KisClient {
         }
     }
 
-    fn should_fallback_to_mock(&self, endpoint: &EndpointSpec, method: &str) -> bool {
+    fn should_fallback_to_mock(&self, operation_kind: OperationKind, method: &str) -> bool {
         self.config.environment == Environment::Real
-            && endpoint.operation_kind == OperationKind::Read
+            && operation_kind == OperationKind::Read
             && self
                 .config
                 .fallback_policy
-                .allows_real_to_mock(method, endpoint.operation_kind)
+                .allows_real_to_mock(method, operation_kind)
     }
 
     async fn send_prepared<T>(
@@ -245,6 +291,10 @@ impl KisClient {
 
         if let Some(tr_id) = &request.tr_id {
             builder = builder.header("tr_id", tr_id);
+        }
+
+        for (name, value) in &request.headers {
+            builder = builder.header(name, value);
         }
 
         if let Some(body) = &request.body {

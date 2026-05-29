@@ -7,9 +7,9 @@ their own secret-management path.
 
 The typed SDK surface currently covers OAuth token issuance, domestic stock
 price inquiry, domestic stock balance inquiry, and domestic stock cash-order
-requests. The bundled mock server covers the captured official endpoint
-inventory more broadly, but endpoints outside the typed surface are not yet
-available as first-class Rust methods.
+requests. The shared inventory-backed execution API can also call every endpoint
+captured in `contracts/kis_official_endpoint_inventory.compact.json` by stable
+operation id while follow-on work adds more ergonomic typed wrappers.
 
 ## Prerequisites
 
@@ -96,6 +96,39 @@ async fn inquire_price(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisEr
 
 The current output type preserves provider fields as `serde_json::Value` so the
 SDK can expose the endpoint before broad typed response structs are finalized.
+
+## Call An Inventory Endpoint
+
+Use `InventoryCatalog` to inspect generated operation ids and
+`execute_inventory` to call a captured endpoint directly:
+
+```rust
+use kis_sdk::endpoint::InventoryRequest;
+use serde_json::json;
+
+async fn inventory_quote(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_inventory::<serde_json::Value>(
+            "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": "005930"
+            })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
+
+The inventory layer validates required query, body, and non-standard header
+fields before network I/O. Standard KIS headers such as `appkey`, `appsecret`,
+`authorization`, `custtype`, `content-type`, and unambiguous `tr_id` values are
+filled by the client. Endpoints with ambiguous TR IDs require
+`InventoryRequest::tr_id_override(...)`. Real-only endpoints are rejected in
+`Environment::Mock`, and real trading mutations remain blocked locally by
+`KisError::LiveTradingDisabled`.
 
 ## Inquire A Domestic Stock Balance
 
