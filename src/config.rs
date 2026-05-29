@@ -24,6 +24,7 @@ impl Environment {
 pub struct KisConfig {
     pub environment: Environment,
     pub base_url: String,
+    pub fallback_base_url: String,
     pub request_timeout: Duration,
     pub token_refresh_skew: Duration,
     pub retry_policy: RetryPolicy,
@@ -35,6 +36,7 @@ impl KisConfig {
         Self {
             environment,
             base_url: environment.default_base_url().to_string(),
+            fallback_base_url: Environment::Mock.default_base_url().to_string(),
             request_timeout: Duration::from_secs(10),
             token_refresh_skew: Duration::from_secs(60),
             retry_policy: RetryPolicy::disabled(),
@@ -44,6 +46,11 @@ impl KisConfig {
 
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into().trim_end_matches('/').to_string();
+        self
+    }
+
+    pub fn with_fallback_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.fallback_base_url = base_url.into().trim_end_matches('/').to_string();
         self
     }
 }

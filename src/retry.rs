@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::error::KisError;
+use crate::{endpoint::OperationKind, error::KisError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RetryPolicy {
@@ -31,11 +31,17 @@ impl RetryPolicy {
         self.backoff
     }
 
-    pub fn should_retry(&self, method: &str, error: &KisError, attempt: usize) -> bool {
+    pub fn should_retry(
+        &self,
+        method: &str,
+        operation_kind: OperationKind,
+        error: &KisError,
+        attempt: usize,
+    ) -> bool {
         if attempt >= self.max_attempts || !error.retryable() {
             return false;
         }
 
-        matches!(method, "GET") || matches!(error, KisError::Transport(_))
+        operation_kind == OperationKind::Read && method == "GET"
     }
 }

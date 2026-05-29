@@ -35,12 +35,28 @@ pub struct KisEnvelope<T = Value> {
     pub msg_cd: Option<String>,
     pub msg1: Option<String>,
     pub output: Option<T>,
+    #[serde(skip)]
+    pub execution: ExecutionMetadata,
 }
 
 impl<T> KisEnvelope<T> {
     pub fn is_success(&self) -> bool {
         self.rt_cd == "0"
     }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ExecutionMetadata {
+    pub attempts: usize,
+    pub fallback: Option<FallbackDecision>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FallbackDecision {
+    pub from_environment: Environment,
+    pub to_environment: Environment,
+    pub from_base_url: String,
+    pub to_base_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,15 +127,28 @@ impl KisClient {
         T: DeserializeOwned,
     {
         let request = endpoint.prepare(self.config.environment, query, body, tr_id_override)?;
+        if self.config.environment == Environment::Real
+            && endpoint.operation_kind == OperationKind::TradingMutation
+        {
+            return Err(KisError::LiveTradingDisabled {
+                endpoint: endpoint.id.to_string(),
+            });
+        }
 
         let mut attempt = 1;
         loop {
-            let result = self.send_prepared(endpoint.operation_kind, &request).await;
+            let result = self
+                .send_prepared(endpoint.operation_kind, &request, &self.config.base_url)
+                .await;
             match result {
-                Ok(response) => return Ok(response),
+                Ok(mut response) => {
+                    response.execution.attempts = attempt;
+                    return Ok(response);
+                }
                 Err(error)
                     if self.config.retry_policy.should_retry(
                         request.method.as_str(),
+                        endpoint.operation_kind,
                         &error,
                         attempt,
                     ) =>
@@ -129,15 +158,47 @@ impl KisClient {
                         tokio::time::sleep(self.config.retry_policy.backoff()).await;
                     }
                 }
+                Err(error)
+                    if error.retryable()
+                        && self.should_fallback_to_mock(endpoint, request.method.as_str()) =>
+                {
+                    let fallback_request =
+                        endpoint.prepare(Environment::Mock, query, body, tr_id_override)?;
+                    let mut response = self
+                        .send_prepared(
+                            endpoint.operation_kind,
+                            &fallback_request,
+                            &self.config.fallback_base_url,
+                        )
+                        .await?;
+                    response.execution.attempts = attempt;
+                    response.execution.fallback = Some(FallbackDecision {
+                        from_environment: Environment::Real,
+                        to_environment: Environment::Mock,
+                        from_base_url: self.config.base_url.clone(),
+                        to_base_url: self.config.fallback_base_url.clone(),
+                    });
+                    return Ok(response);
+                }
                 Err(error) => return Err(error),
             }
         }
+    }
+
+    fn should_fallback_to_mock(&self, endpoint: &EndpointSpec, method: &str) -> bool {
+        self.config.environment == Environment::Real
+            && endpoint.operation_kind == OperationKind::Read
+            && self
+                .config
+                .fallback_policy
+                .allows_real_to_mock(method, endpoint.operation_kind)
     }
 
     async fn send_prepared<T>(
         &self,
         operation_kind: OperationKind,
         request: &PreparedRequest,
+        base_url: &str,
     ) -> Result<KisEnvelope<T>, KisError>
     where
         T: DeserializeOwned,
@@ -146,7 +207,7 @@ impl KisClient {
             .http
             .request(
                 request.method.clone(),
-                format!("{}{}", self.config.base_url, request.path),
+                format!("{base_url}{}", request.path),
             )
             .timeout(self.config.request_timeout)
             .query(&request.query);
@@ -229,6 +290,11 @@ impl KisClientBuilder {
 
     pub fn fallback_policy(mut self, fallback_policy: FallbackPolicy) -> Self {
         self.config.fallback_policy = fallback_policy;
+        self
+    }
+
+    pub fn fallback_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.config = self.config.with_fallback_base_url(base_url);
         self
     }
 

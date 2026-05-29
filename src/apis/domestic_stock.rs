@@ -152,6 +152,15 @@ impl CashOrderRequest {
             order_unit_price: price.to_string(),
         }
     }
+
+    fn validate(&self) -> Result<(), KisError> {
+        require_digits("CANO", &self.cano, 8)?;
+        require_digits("ACNT_PRDT_CD", &self.account_product_code, 2)?;
+        require_digits("PDNO", &self.product_number, 6)?;
+        require_positive_u64("ORD_QTY", &self.order_quantity)?;
+        require_positive_u64("ORD_UNPR", &self.order_unit_price)?;
+        Ok(())
+    }
 }
 
 impl KisClient {
@@ -176,8 +185,28 @@ impl KisClient {
         side: CashOrderSide,
         request: &CashOrderRequest,
     ) -> Result<KisEnvelope<Value>, KisError> {
+        request.validate()?;
         let tr_id = side.tr_id(self.environment() == crate::config::Environment::Mock);
         self.execute(&ORDER_CASH, Option::<&()>::None, Some(request), Some(tr_id))
             .await
+    }
+}
+
+fn require_digits(name: &str, value: &str, len: usize) -> Result<(), KisError> {
+    if value.len() == len && value.chars().all(|ch| ch.is_ascii_digit()) {
+        Ok(())
+    } else {
+        Err(KisError::Validation(format!(
+            "{name} must be exactly {len} ASCII digits"
+        )))
+    }
+}
+
+fn require_positive_u64(name: &str, value: &str) -> Result<(), KisError> {
+    match value.parse::<u64>() {
+        Ok(number) if number > 0 => Ok(()),
+        _ => Err(KisError::Validation(format!(
+            "{name} must be a positive integer"
+        ))),
     }
 }

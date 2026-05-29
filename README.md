@@ -13,6 +13,8 @@ The first implementation exposes:
   cash order calls against the bundled mock server contract.
 - Explicit `RetryPolicy` and `FallbackPolicy` options. Retry is disabled by
   default; trading POST retries are not enabled by the conservative read policy.
+  Real-to-mock fallback is opt-in, read-only, and recorded on response execution
+  metadata when used.
 
 ## Architecture
 
