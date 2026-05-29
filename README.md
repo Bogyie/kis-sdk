@@ -146,6 +146,10 @@ mock support or explicit `KIS_MOCK_UNSUPPORTED_ENVIRONMENT` rejection.
 
 - [KIS SDK usage guide](docs/usage.md)
 
+## Release
+
+- [Crates.io publish workflow](docs/release/crates-publish.md)
+
 ## Mock Server
 
 - [KIS Mock Server](docs/mock-server/README.md)
