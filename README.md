@@ -24,8 +24,9 @@ more ergonomic typed wrappers.
 - `KisClient` builder with explicit real/mock environment selection and shared
   `reqwest` client reuse.
 - Redacted `AppCredentials`, `Account`, and `SecretString` helpers.
-- OAuth token issuance and in-memory token reuse, with static bearer token
-  injection for tests and mock workflows.
+- OAuth token issuance, token revoke, and WebSocket approval-key issuance, with
+  in-memory token reuse and static bearer token injection for tests and mock
+  workflows.
 - Typed domestic stock methods for quotation price, balance inquiry, and cash
   order calls.
 - Inventory-backed `execute_inventory` support for the bundled official
@@ -103,6 +104,8 @@ The typed SDK currently exposes:
 | Method | KIS path | Notes |
 | --- | --- | --- |
 | `issue_access_token` | `/oauth2/tokenP` | OAuth token issuance and in-memory token reuse. |
+| `revoke_access_token` | `/oauth2/revokeP` | Explicit OAuth access-token revoke; never called implicitly on drop. |
+| `issue_realtime_approval_key` | `/oauth2/Approval` | Issues a WebSocket access approval key only; live WebSocket subscription management is outside the current typed API. |
 | `inquire_domestic_stock_price` | `/uapi/domestic-stock/v1/quotations/inquire-price` | Domestic stock quote read. |
 | `inquire_domestic_stock_balance` | `/uapi/domestic-stock/v1/trading/inquire-balance` | Domestic stock balance read. |
 | `place_domestic_stock_cash_order` | `/uapi/domestic-stock/v1/trading/order-cash` | Mock cash orders are supported; real cash orders are locally blocked by `KisError::LiveTradingDisabled`. |
