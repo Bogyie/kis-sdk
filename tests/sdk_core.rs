@@ -75,6 +75,26 @@ fn inventory_catalog_addresses_every_official_endpoint_with_unique_operation_ids
     }
 }
 
+#[test]
+fn inventory_operation_kind_uses_contract_kind_not_http_method_only() {
+    let catalog = InventoryCatalog::bundled().expect("inventory catalog builds");
+
+    let realtime = catalog
+        .endpoint("domestic_stock_realtime_quotation.post_tryitout_h0stcnt0")
+        .expect("realtime operation exists");
+    assert_eq!(realtime.operation_kind, OperationKind::Read);
+
+    let cash_order = catalog
+        .endpoint("domestic_stock_trading_account.post_domestic_stock_trading_order_cash")
+        .expect("cash order operation exists");
+    assert_eq!(cash_order.operation_kind, OperationKind::TradingMutation);
+
+    let balance = catalog
+        .endpoint("domestic_stock_trading_account.get_domestic_stock_trading_inquire_balance")
+        .expect("balance operation exists");
+    assert_eq!(balance.operation_kind, OperationKind::Read);
+}
+
 #[tokio::test]
 async fn inventory_execute_calls_mocked_endpoint_by_operation_id() {
     let server = MockServer::start().await.expect("mock server starts");
@@ -100,6 +120,35 @@ async fn inventory_execute_calls_mocked_endpoint_by_operation_id() {
     assert!(response.output.is_some());
 
     server.shutdown().await;
+}
+
+#[tokio::test]
+async fn inventory_real_non_trading_post_is_not_blocked_by_live_trading_guard() {
+    let client = KisClient::builder(Environment::Real)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_inventory::<serde_json::Value>(
+            "domestic_stock_realtime_quotation.post_tryitout_h0stcnt0",
+            InventoryRequest::new()
+                .header("approval_key", "test_approval_key")
+                .header("tr_type", "1")
+                .body(json!({
+                    "tr_id": "H0STCNT0",
+                    "tr_key": "005930"
+                })),
+        )
+        .await
+        .expect_err("unreachable local URL should fail at transport, not live trading guard");
+
+    assert!(
+        matches!(error, KisError::Transport(_)),
+        "expected transport error after passing live trading guard, got {error:?}"
+    );
 }
 
 #[tokio::test]

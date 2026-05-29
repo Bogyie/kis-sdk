@@ -458,11 +458,23 @@ fn non_empty_tr_id(value: &str) -> Option<&str> {
 fn operation_kind(endpoint: &ContractEndpoint) -> OperationKind {
     if endpoint.is_auth() {
         OperationKind::Auth
-    } else if endpoint.method == "GET" {
-        OperationKind::Read
     } else {
-        OperationKind::TradingMutation
+        match endpoint.kind.as_str() {
+            "quotation/info" | "websocket" => OperationKind::Read,
+            "trading/account"
+                if endpoint.method == "POST" && is_trading_mutation_path(&endpoint.path) =>
+            {
+                OperationKind::TradingMutation
+            }
+            "trading/account" => OperationKind::Read,
+            _ if endpoint.method == "GET" => OperationKind::Read,
+            _ => OperationKind::TradingMutation,
+        }
     }
+}
+
+fn is_trading_mutation_path(path: &str) -> bool {
+    path.contains("/order") || path.ends_with("/buy") || path.ends_with("/sell")
 }
 
 fn operation_id(endpoint: &ContractEndpoint) -> String {
