@@ -31,4 +31,6 @@ The action is third-party and not GitHub-certified. Pinning the full commit SHA 
 
 ## Current Package Readiness Note
 
-`Cargo.toml` currently has `publish = false`, so the publish action will not find a publishable package until package-readiness work removes that guard and completes crates.io metadata. This workflow is still useful for validating the release gate, secret boundary, and trigger behavior before the package is enabled for publishing.
+BOG-241 / PR #5 added crates.io package metadata and package-readiness documentation to the integration branch. `Cargo.toml` intentionally still has `publish = false` until a separate release authorization gate approves enabling crates.io publishing.
+
+This workflow is useful for validating the release gate, secret boundary, and trigger behavior before the package is enabled for publishing. Before any real publish attempt, remove `publish = false` only with explicit release authorization, rerun package validation, and review the generated package contents.
