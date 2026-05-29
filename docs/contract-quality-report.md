@@ -50,6 +50,24 @@ The initial typed SDK surface intentionally exposes a narrow domestic stock slic
 
 All other official endpoints are represented in the bundled contract and mock route inventory, but are not yet promoted to typed SDK request/response methods.
 
+## Domestic Futures/Options SDK Coverage
+
+The domestic futures/options child surface exposes scoped inventory-backed SDK
+methods for all 44 endpoints in the requested official collections:
+
+| Collection | Endpoint count | Mock support in inventory | SDK coverage |
+| --- | ---: | ---: | --- |
+| Domestic futures/options trading/account | 15 | 5 real+mock, 10 real-only | Covered by `execute_domestic_futures_options_trading_account` and `TRADING_ACCOUNT_OPERATION_IDS`. |
+| Domestic futures/options quotations | 9 | 3 real+mock, 6 real-only | Covered by `execute_domestic_futures_options_quotation` and `QUOTATION_OPERATION_IDS`. |
+| Domestic futures/options realtime | 20 | 1 real+mock, 19 real-only | Covered by `execute_domestic_futures_options_realtime_quotation` and `REALTIME_QUOTATION_OPERATION_IDS`. |
+
+The combined `execute_domestic_futures_options` method accepts the same 44
+operation ids and rejects operation ids outside the domestic futures/options
+collections before network I/O. Order-changing endpoints retain local
+`KisError::LiveTradingDisabled` protection in `Environment::Real`, and
+side/session-specific TR ID metadata requires explicit
+`InventoryRequest::tr_id_override(...)` selection.
+
 ## Mock Contract Evidence
 
 The mock server loads the bundled contract through `ContractInventory::bundled()` and builds its route index from every `(method, path)` pair.

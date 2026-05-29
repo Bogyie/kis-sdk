@@ -28,6 +28,8 @@ more ergonomic typed wrappers.
   injection for tests and mock workflows.
 - Typed domestic stock methods for quotation price, balance inquiry, and cash
   order calls.
+- Domain-scoped domestic futures/options inventory methods for 44
+  order/account, quotation, and realtime quotation endpoints.
 - Inventory-backed `execute_inventory` support for the bundled official
   endpoint inventory, including required input/header validation and TR ID
   selection rules from the captured metadata.
@@ -106,6 +108,20 @@ The typed SDK currently exposes:
 | `inquire_domestic_stock_price` | `/uapi/domestic-stock/v1/quotations/inquire-price` | Domestic stock quote read. |
 | `inquire_domestic_stock_balance` | `/uapi/domestic-stock/v1/trading/inquire-balance` | Domestic stock balance read. |
 | `place_domestic_stock_cash_order` | `/uapi/domestic-stock/v1/trading/order-cash` | Mock cash orders are supported; real cash orders are locally blocked by `KisError::LiveTradingDisabled`. |
+
+The domestic futures/options SDK surface exposes inventory-backed domain
+methods for all 44 endpoints in these bundled official collections:
+
+| Collection | Endpoint count | SDK entry point |
+| --- | ---: | --- |
+| Domestic futures/options trading/account | 15 | `execute_domestic_futures_options_trading_account` |
+| Domestic futures/options quotations | 9 | `execute_domestic_futures_options_quotation` |
+| Domestic futures/options realtime quotations | 20 | `execute_domestic_futures_options_realtime_quotation` |
+
+The same endpoints are also available through the combined
+`execute_domestic_futures_options` method. Operation ids are exposed through
+`kis_sdk::apis::domestic_futures_options::{TRADING_ACCOUNT_OPERATION_IDS,
+QUOTATION_OPERATION_IDS, REALTIME_QUOTATION_OPERATION_IDS}`.
 
 The bundled inventory covers 338 official endpoints across 22 collections.
 Endpoints outside the typed SDK surface do not yet have ergonomic typed Rust

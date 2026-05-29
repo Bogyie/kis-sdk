@@ -4,6 +4,10 @@ use axum::{
     Json, Router,
 };
 use kis_sdk::{
+    apis::domestic_futures_options::{
+        operation_ids as domestic_futures_options_operation_ids, QUOTATION_OPERATION_IDS,
+        REALTIME_QUOTATION_OPERATION_IDS, TRADING_ACCOUNT_OPERATION_IDS,
+    },
     apis::domestic_stock::{
         CashOrderRequest, CashOrderSide, InquireBalanceRequest, InquirePriceRequest,
     },
@@ -245,6 +249,159 @@ async fn inventory_execute_rejects_real_only_endpoint_in_mock_before_network() {
         .expect_err("real-only endpoint should not run against mock");
 
     assert!(matches!(error, KisError::UnsupportedEnvironment { .. }));
+}
+
+#[test]
+fn domestic_futures_options_operation_ids_cover_inventory_collections() {
+    let catalog = InventoryCatalog::bundled().expect("inventory catalog builds");
+    let actual = catalog
+        .endpoints()
+        .iter()
+        .filter(|endpoint| endpoint.collection_name.starts_with("[국내선물옵션]"))
+        .map(|endpoint| endpoint.operation_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let expected =
+        domestic_futures_options_operation_ids().collect::<std::collections::HashSet<_>>();
+
+    assert_eq!(TRADING_ACCOUNT_OPERATION_IDS.len(), 15);
+    assert_eq!(QUOTATION_OPERATION_IDS.len(), 9);
+    assert_eq!(REALTIME_QUOTATION_OPERATION_IDS.len(), 20);
+    assert_eq!(expected.len(), 44);
+    assert_eq!(actual, expected);
+}
+
+#[tokio::test]
+async fn domestic_futures_options_quotation_executes_real_mock_endpoint() {
+    let server = MockServer::start().await.expect("mock server starts");
+    let client = KisClient::builder(Environment::Mock)
+        .base_url(server.base_url())
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let response = client
+        .execute_domestic_futures_options_quotation::<serde_json::Value>(
+            "domestic_futures_options_quotation.get_domestic_futureoption_quotations_inquire_price",
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "F",
+                "FID_INPUT_ISCD": "101W09"
+            })),
+        )
+        .await
+        .expect("domestic futures/options quote succeeds");
+
+    assert!(response.is_success());
+    assert!(response.output.is_some());
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn domestic_futures_options_scope_rejects_non_domain_operation_id() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_domestic_futures_options::<serde_json::Value>(
+            "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
+            InventoryRequest::new(),
+        )
+        .await
+        .expect_err("non-domain operation should fail locally");
+
+    assert!(matches!(error, KisError::Validation(_)));
+}
+
+#[tokio::test]
+async fn domestic_futures_options_order_requires_explicit_tr_id_override() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let body = json!({
+        "ACNT_PRDT_CD": "03",
+        "CANO": "12345678",
+        "ORD_DVSN_CD": "01",
+        "ORD_PRCS_DVSN_CD": "02",
+        "ORD_QTY": "1",
+        "SHTN_PDNO": "101W09",
+        "SLL_BUY_DVSN_CD": "02",
+        "UNIT_PRICE": "350.00"
+    });
+
+    let error = client
+        .execute_domestic_futures_options_trading_account::<serde_json::Value>(
+            "domestic_futures_options_trading_account.post_domestic_futureoption_trading_order",
+            InventoryRequest::new().body(body),
+        )
+        .await
+        .expect_err("ambiguous domestic futures/options order TR ID should require override");
+
+    assert!(matches!(error, KisError::AmbiguousTrId { .. }));
+}
+
+#[tokio::test]
+async fn domestic_futures_options_order_with_override_hits_live_trading_guard_in_real() {
+    let client = KisClient::builder(Environment::Real)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let body = json!({
+        "ACNT_PRDT_CD": "03",
+        "CANO": "12345678",
+        "ORD_DVSN_CD": "01",
+        "ORD_PRCS_DVSN_CD": "02",
+        "ORD_QTY": "1",
+        "SHTN_PDNO": "101W09",
+        "SLL_BUY_DVSN_CD": "02",
+        "UNIT_PRICE": "350.00"
+    });
+
+    let error = client
+        .execute_domestic_futures_options_trading_account::<serde_json::Value>(
+            "domestic_futures_options_trading_account.post_domestic_futureoption_trading_order",
+            InventoryRequest::new()
+                .body(body)
+                .tr_id_override("TTTO1101U"),
+        )
+        .await
+        .expect_err("real trading mutation should be locally blocked");
+
+    assert!(matches!(error, KisError::LiveTradingDisabled { .. }));
+}
+
+#[tokio::test]
+async fn domestic_futures_options_realtime_validates_required_headers() {
+    let client = KisClient::builder(Environment::Real)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_domestic_futures_options_realtime_quotation::<serde_json::Value>(
+            "domestic_futures_options_realtime_quotation.post_tryitout_h0ifasp0",
+            InventoryRequest::new().body(json!({
+                "tr_id": "H0IFASP0",
+                "tr_key": "101W09"
+            })),
+        )
+        .await
+        .expect_err("missing approval_key and tr_type should fail locally");
+
+    assert!(matches!(error, KisError::Validation(_)));
 }
 
 #[tokio::test]

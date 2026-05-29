@@ -6,10 +6,11 @@ against the bundled mock server first and then wire real KIS credentials through
 their own secret-management path.
 
 The typed SDK surface currently covers OAuth token issuance, domestic stock
-price inquiry, domestic stock balance inquiry, and domestic stock cash-order
-requests. The shared inventory-backed execution API can also call every endpoint
-captured in `contracts/kis_official_endpoint_inventory.compact.json` by stable
-operation id while follow-on work adds more ergonomic typed wrappers.
+price inquiry, domestic stock balance inquiry, domestic stock cash-order
+requests, and domain-scoped domestic futures/options inventory calls. The
+shared inventory-backed execution API can also call every endpoint captured in
+`contracts/kis_official_endpoint_inventory.compact.json` by stable operation id
+while follow-on work adds more ergonomic typed wrappers.
 
 ## Prerequisites
 
@@ -128,6 +129,44 @@ fields before network I/O. Standard KIS headers such as `appkey`, `appsecret`,
 filled by the client. Endpoints with ambiguous TR IDs require
 `InventoryRequest::tr_id_override(...)`. Real-only endpoints are rejected in
 `Environment::Mock`, and real trading mutations remain blocked locally by
+`KisError::LiveTradingDisabled`.
+
+## Call A Domestic Futures/Options Endpoint
+
+Domestic futures/options coverage is exposed as a scoped inventory API for 44
+official endpoints: 15 trading/account endpoints, 9 quotation endpoints, and 20
+realtime quotation endpoints. The operation id constants are available from
+`kis_sdk::apis::domestic_futures_options`.
+
+```rust
+use kis_sdk::{
+    apis::domestic_futures_options::QUOTATION_OPERATION_IDS,
+    endpoint::InventoryRequest,
+};
+use serde_json::json;
+
+async fn domestic_futures_options_quote(
+    client: &kis_sdk::KisClient,
+) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_domestic_futures_options_quotation::<serde_json::Value>(
+            QUOTATION_OPERATION_IDS[0],
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "F",
+                "FID_INPUT_ISCD": "101W09"
+            })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
+
+Order-changing domestic futures/options endpoints keep the same SDK safety
+rules as other trading mutations. Inventory metadata with side/session-specific
+TR ID text requires `InventoryRequest::tr_id_override(...)`, and real
+environment trading mutations are blocked locally by
 `KisError::LiveTradingDisabled`.
 
 ## Inquire A Domestic Stock Balance
