@@ -50,6 +50,23 @@ The initial typed SDK surface intentionally exposes a narrow domestic stock slic
 
 All other official endpoints are represented in the bundled contract and mock route inventory, but are not yet promoted to typed SDK request/response methods.
 
+## Domestic Stock REST Inventory API
+
+`execute_domestic_stock_rest` exposes the listed domestic stock REST collections through the same inventory-backed request path while rejecting out-of-scope operation ids such as realtime domestic stock endpoints.
+
+| Collection | Endpoint count |
+| --- | ---: |
+| Domestic stock trading/account | 23 |
+| Domestic stock quotations | 22 |
+| Domestic stock ELW quotations | 22 |
+| Domestic stock industry/other | 14 |
+| Domestic stock item information | 26 |
+| Domestic stock chart/analysis | 29 |
+| Domestic stock rank analysis | 22 |
+| **Total domestic stock REST listed coverage** | **158** |
+
+Executable coverage in `tests/sdk_core.rs` verifies the 158-endpoint scoped catalog, rejects domestic stock realtime operation ids, executes all 18 `real+mock` endpoints against the generated mock contract with inventory-derived request data, and confirms all 140 `real_only` endpoints are rejected in mock mode before network I/O.
+
 ## Mock Contract Evidence
 
 The mock server loads the bundled contract through `ContractInventory::bundled()` and builds its route index from every `(method, path)` pair.

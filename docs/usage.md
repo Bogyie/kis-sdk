@@ -122,6 +122,32 @@ async fn inventory_quote(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::Kis
 }
 ```
 
+For the listed domestic stock REST collections, `execute_domestic_stock_rest`
+adds a scope guard around the same inventory execution path. It covers 158
+endpoints across domestic stock trading/account, quotation, ELW, sector/misc,
+product info, market analysis, and ranking analysis collections. Realtime
+domestic stock endpoints remain outside this REST helper.
+
+```rust
+use kis_sdk::endpoint::InventoryRequest;
+use serde_json::json;
+
+async fn domestic_stock_rest_quote(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_domestic_stock_rest::<serde_json::Value>(
+            "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": "005930"
+            })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
+
 The inventory layer validates required query, body, and non-standard header
 fields before network I/O. Standard KIS headers such as `appkey`, `appsecret`,
 `authorization`, `custtype`, `content-type`, and unambiguous `tr_id` values are
