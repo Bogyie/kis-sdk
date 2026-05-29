@@ -120,5 +120,45 @@ async fn mock_server_exposes_error_rate_limit_and_unsupported_fixtures() {
     assert_eq!(unsupported["msg_cd"], "KIS_MOCK_UNSUPPORTED_ENVIRONMENT");
     assert_eq!(unsupported["detail"]["env_support"], "real_only");
 
+    for scenario in [
+        "unauthorized",
+        "rate-limit",
+        "retryable-500",
+        "provider-error",
+    ] {
+        let response = client
+            .get(format!(
+                "{}/uapi/domestic-stock/v1/quotations/inquire-price-2",
+                server.base_url()
+            ))
+            .header("x-kis-mock-scenario", scenario)
+            .send()
+            .await
+            .expect("unsupported scenario response");
+
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+        let unsupported: Value = response.json().await.expect("unsupported scenario json");
+        assert_eq!(
+            unsupported["msg_cd"], "KIS_MOCK_UNSUPPORTED_ENVIRONMENT",
+            "scenario {scenario} must not override real_only support"
+        );
+        assert_eq!(unsupported["detail"]["env_support"], "real_only");
+    }
+
+    let wrong_method: Value = client
+        .post(format!(
+            "{}/uapi/domestic-stock/v1/quotations/inquire-price",
+            server.base_url()
+        ))
+        .send()
+        .await
+        .expect("method not allowed response")
+        .json()
+        .await
+        .expect("method not allowed json");
+
+    assert_eq!(wrong_method["msg_cd"], "KIS_MOCK_METHOD_NOT_ALLOWED");
+    assert_eq!(wrong_method["detail"]["actual"], "POST");
+
     server.shutdown().await;
 }

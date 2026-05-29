@@ -16,6 +16,7 @@ use crate::contract::{ContractEndpoint, ContractInventory, EnvironmentSupport, R
 #[derive(Clone)]
 struct MockState {
     routes: Arc<HashMap<RouteKey, ContractEndpoint>>,
+    methods_by_path: Arc<HashMap<String, Vec<String>>>,
 }
 
 pub struct MockServer {
@@ -65,8 +66,10 @@ impl MockServer {
 }
 
 pub fn app(inventory: ContractInventory) -> Router {
+    let methods_by_path = method_index(&inventory);
     let state = MockState {
         routes: Arc::new(inventory.route_index()),
+        methods_by_path: Arc::new(methods_by_path),
     };
 
     Router::new()
@@ -87,6 +90,14 @@ async fn handle(State(state): State<MockState>, request: Request<Body>) -> Respo
         method: method.to_string(),
         path: path.clone(),
     }) else {
+        if let Some(expected) = state.methods_by_path.get(&path) {
+            return error_response(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "KIS_MOCK_METHOD_NOT_ALLOWED",
+                json!({ "expected": expected, "actual": method.as_str() }),
+            );
+        }
+
         return error_response(
             StatusCode::NOT_FOUND,
             "KIS_MOCK_UNKNOWN_ENDPOINT",
@@ -99,6 +110,23 @@ async fn handle(State(state): State<MockState>, request: Request<Body>) -> Respo
             StatusCode::METHOD_NOT_ALLOWED,
             "KIS_MOCK_METHOD_NOT_ALLOWED",
             json!({ "expected": endpoint.method, "actual": method.as_str() }),
+        );
+    }
+
+    if endpoint.is_auth() {
+        return auth_response(endpoint.path.as_str());
+    }
+
+    if endpoint.env_support == EnvironmentSupport::RealOnly {
+        return error_response(
+            StatusCode::NOT_IMPLEMENTED,
+            "KIS_MOCK_UNSUPPORTED_ENVIRONMENT",
+            json!({
+                "endpoint_id": endpoint.id,
+                "method": endpoint.method,
+                "path": endpoint.path,
+                "env_support": "real_only"
+            }),
         );
     }
 
@@ -128,28 +156,24 @@ async fn handle(State(state): State<MockState>, request: Request<Body>) -> Respo
         None => {}
     }
 
-    if endpoint.is_auth() {
-        return auth_response(endpoint.path.as_str());
-    }
-
-    if endpoint.env_support == EnvironmentSupport::RealOnly {
-        return error_response(
-            StatusCode::NOT_IMPLEMENTED,
-            "KIS_MOCK_UNSUPPORTED_ENVIRONMENT",
-            json!({
-                "endpoint_id": endpoint.id,
-                "method": endpoint.method,
-                "path": endpoint.path,
-                "env_support": "real_only"
-            }),
-        );
-    }
-
     if let Err(error) = validate_headers(endpoint, request.headers()) {
         return error_response(StatusCode::BAD_REQUEST, "KIS_MOCK_INVALID_HEADERS", error);
     }
 
     Json(success_body(endpoint)).into_response()
+}
+
+fn method_index(inventory: &ContractInventory) -> HashMap<String, Vec<String>> {
+    let mut methods_by_path: HashMap<String, Vec<String>> = HashMap::new();
+
+    for endpoint in &inventory.endpoints {
+        let methods = methods_by_path.entry(endpoint.path.clone()).or_default();
+        if !methods.contains(&endpoint.method) {
+            methods.push(endpoint.method.clone());
+        }
+    }
+
+    methods_by_path
 }
 
 fn auth_response(path: &str) -> Response {

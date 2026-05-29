@@ -14,7 +14,9 @@ cargo run --bin kis-mock-server -- 127.0.0.1:0
 The server dynamically registers all 338 official endpoint routes from
 `contracts/kis_official_endpoint_inventory.compact.json`. Routes marked
 `real_only` return `KIS_MOCK_UNSUPPORTED_ENVIRONMENT` instead of simulating mock
-support that the official contract does not provide.
+support that the official contract does not provide. Environment support is
+checked before scenario fixtures, so scenario headers cannot make a `real_only`
+route look mock-supported.
 
 Supported deterministic fixture scenarios use the `x-kis-mock-scenario` header:
 
