@@ -46,7 +46,7 @@ The initial typed SDK surface intentionally exposes a narrow domestic stock slic
 | `issue_access_token` | POST | `/oauth2/tokenP` | Covered | Auth token issuance and in-memory token reuse. |
 | `inquire_domestic_stock_price` | GET | `/uapi/domestic-stock/v1/quotations/inquire-price` | Covered | Uses `FHKST01010100` for real and mock. |
 | `inquire_domestic_stock_balance` | GET | `/uapi/domestic-stock/v1/trading/inquire-balance` | Covered | Uses `TTTC8434R` real and `VTTC8434R` mock. |
-| `place_domestic_stock_cash_order` | POST | `/uapi/domestic-stock/v1/trading/order-cash` | Covered | Buy/sell TR IDs are selected by side and environment. Real trading is locally blocked unless a future live-trading guard is added. |
+| `place_domestic_stock_cash_order` | POST | `/uapi/domestic-stock/v1/trading/order-cash` | Covered | Buy/sell TR IDs are selected by side and environment. Real trading is locally blocked by `KisError::LiveTradingDisabled` before network I/O. |
 
 All other official endpoints are represented in the bundled contract and mock route inventory, but are not yet promoted to typed SDK request/response methods.
 
