@@ -40,6 +40,9 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
+      - name: Verify crates.io publishable package exists
+        run: python3 scripts/verify-crates-publishable.py
+
       - name: Verify package contents
         run: cargo package --locked
 
@@ -54,6 +57,9 @@ jobs:
 
       - name: Install Rust stable
         run: rustup toolchain install stable --profile minimal
+
+      - name: Verify crates.io publishable package exists
+        run: python3 scripts/verify-crates-publishable.py
 
       - name: Exercise publish-crates without secrets
         uses: katyo/publish-crates@02cc2f1ad653fb25c7d1ff9eb590a8a50d06186b
@@ -75,6 +81,9 @@ jobs:
 
       - name: Install Rust stable
         run: rustup toolchain install stable --profile minimal
+
+      - name: Verify crates.io publishable package exists
+        run: python3 scripts/verify-crates-publishable.py
 
       - name: Verify crates.io token is configured
         env:
