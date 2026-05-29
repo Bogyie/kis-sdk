@@ -9,7 +9,7 @@ use kis_sdk::{
     },
     config::Environment,
     credentials::{Account, AppCredentials, SecretString},
-    endpoint::OperationKind,
+    endpoint::{InventoryCatalog, InventoryRequest, OperationKind},
     error::KisError,
     fallback::FallbackPolicy,
     mock::MockServer,
@@ -53,6 +53,198 @@ async fn client_calls_mocked_domestic_stock_read_and_order_slice() {
     assert!(order.is_success());
 
     server.shutdown().await;
+}
+
+#[test]
+fn inventory_catalog_addresses_every_official_endpoint_with_unique_operation_ids() {
+    let catalog = InventoryCatalog::bundled().expect("inventory catalog builds");
+
+    assert_eq!(catalog.endpoint_count(), 338);
+
+    for endpoint in catalog.endpoints() {
+        assert!(
+            catalog.endpoint(&endpoint.operation_id).is_some(),
+            "{} must be addressable by operation id",
+            endpoint.operation_id
+        );
+        assert!(
+            !endpoint.operation_id.contains("unknown_collection"),
+            "{} must use a curated collection slug",
+            endpoint.operation_id
+        );
+    }
+}
+
+#[test]
+fn inventory_operation_kind_uses_contract_kind_not_http_method_only() {
+    let catalog = InventoryCatalog::bundled().expect("inventory catalog builds");
+
+    let realtime = catalog
+        .endpoint("domestic_stock_realtime_quotation.post_tryitout_h0stcnt0")
+        .expect("realtime operation exists");
+    assert_eq!(realtime.operation_kind, OperationKind::Read);
+
+    let cash_order = catalog
+        .endpoint("domestic_stock_trading_account.post_domestic_stock_trading_order_cash")
+        .expect("cash order operation exists");
+    assert_eq!(cash_order.operation_kind, OperationKind::TradingMutation);
+
+    let balance = catalog
+        .endpoint("domestic_stock_trading_account.get_domestic_stock_trading_inquire_balance")
+        .expect("balance operation exists");
+    assert_eq!(balance.operation_kind, OperationKind::Read);
+}
+
+#[tokio::test]
+async fn inventory_execute_calls_mocked_endpoint_by_operation_id() {
+    let server = MockServer::start().await.expect("mock server starts");
+    let client = KisClient::builder(Environment::Mock)
+        .base_url(server.base_url())
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let response = client
+        .execute_inventory::<serde_json::Value>(
+            "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": "005930"
+            })),
+        )
+        .await
+        .expect("inventory-backed quote succeeds");
+
+    assert!(response.is_success());
+    assert!(response.output.is_some());
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn inventory_real_non_trading_post_is_not_blocked_by_live_trading_guard() {
+    let client = KisClient::builder(Environment::Real)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_inventory::<serde_json::Value>(
+            "domestic_stock_realtime_quotation.post_tryitout_h0stcnt0",
+            InventoryRequest::new()
+                .header("approval_key", "test_approval_key")
+                .header("tr_type", "1")
+                .body(json!({
+                    "tr_id": "H0STCNT0",
+                    "tr_key": "005930"
+                })),
+        )
+        .await
+        .expect_err("unreachable local URL should fail at transport, not live trading guard");
+
+    assert!(
+        matches!(error, KisError::Transport(_)),
+        "expected transport error after passing live trading guard, got {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn inventory_execute_rejects_missing_required_query_before_network() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_inventory::<serde_json::Value>(
+            "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "J"
+            })),
+        )
+        .await
+        .expect_err("missing query field should fail locally");
+
+    assert!(matches!(error, KisError::Validation(_)));
+}
+
+#[tokio::test]
+async fn inventory_execute_requires_override_for_ambiguous_tr_id() {
+    let body = json!({
+        "CANO": "12345678",
+        "ACNT_PRDT_CD": "01",
+        "PDNO": "005930",
+        "ORD_DVSN": "00",
+        "ORD_QTY": "1",
+        "ORD_UNPR": "70000"
+    });
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_inventory::<serde_json::Value>(
+            "domestic_stock_trading_account.post_domestic_stock_trading_order_cash",
+            InventoryRequest::new().body(body),
+        )
+        .await
+        .expect_err("ambiguous order TR ID should require override");
+
+    assert!(matches!(error, KisError::AmbiguousTrId { .. }));
+}
+
+#[tokio::test]
+async fn inventory_execute_rejects_missing_required_header_before_network() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_inventory::<serde_json::Value>(
+            "domestic_stock_realtime_quotation.post_tryitout_h0stcnt0",
+            InventoryRequest::new().body(json!({
+                "tr_id": "H0STCNT0",
+                "tr_key": "005930"
+            })),
+        )
+        .await
+        .expect_err("missing approval_key and tr_type should fail locally");
+
+    assert!(matches!(error, KisError::Validation(_)));
+}
+
+#[tokio::test]
+async fn inventory_execute_rejects_real_only_endpoint_in_mock_before_network() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_inventory::<serde_json::Value>(
+            "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price_2",
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": "005930"
+            })),
+        )
+        .await
+        .expect_err("real-only endpoint should not run against mock");
+
+    assert!(matches!(error, KisError::UnsupportedEnvironment { .. }));
 }
 
 #[tokio::test]

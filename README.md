@@ -4,9 +4,10 @@ Rust SDK core for Korea Investment & Securities Open API.
 
 `kis-sdk` is an early Rust client and local mock contract harness for KIS Open
 API integrations. The current typed SDK surface is intentionally narrow: it
-focuses on OAuth token issuance and a small domestic stock slice while the
-bundled mock server tracks the broader official endpoint inventory captured for
-this project.
+focuses on OAuth token issuance and a small domestic stock slice. A lower-level
+inventory-backed execution API can address and call the broader bundled
+official endpoint inventory by stable operation id while follow-on work adds
+more ergonomic typed wrappers.
 
 ## Current Status
 
@@ -27,6 +28,9 @@ this project.
   injection for tests and mock workflows.
 - Typed domestic stock methods for quotation price, balance inquiry, and cash
   order calls.
+- Inventory-backed `execute_inventory` support for the bundled official
+  endpoint inventory, including required input/header validation and TR ID
+  selection rules from the captured metadata.
 - Local mock server generated from the bundled official endpoint inventory.
 - Explicit `RetryPolicy` and `FallbackPolicy` options. Retry is disabled by
   default. `RetryPolicy::conservative_reads()` retries retryable GET/read
@@ -103,9 +107,31 @@ The typed SDK currently exposes:
 | `inquire_domestic_stock_balance` | `/uapi/domestic-stock/v1/trading/inquire-balance` | Domestic stock balance read. |
 | `place_domestic_stock_cash_order` | `/uapi/domestic-stock/v1/trading/order-cash` | Mock cash orders are supported; real cash orders are locally blocked by `KisError::LiveTradingDisabled`. |
 
-The bundled contract and mock route inventory cover 338 official endpoints
-across 22 collections. Endpoints outside the typed SDK surface are available as
-contract/mock evidence, not as first-class typed Rust request methods yet.
+The bundled inventory covers 338 official endpoints across 22 collections.
+Endpoints outside the typed SDK surface do not yet have ergonomic typed Rust
+request methods, but they can be addressed and called through the lower-level
+inventory execution API with stable operation ids:
+
+```rust
+use kis_sdk::endpoint::InventoryRequest;
+use serde_json::json;
+
+let response = client
+    .execute_inventory::<serde_json::Value>(
+        "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
+        InventoryRequest::new().query(json!({
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": "005930"
+        })),
+    )
+    .await?;
+```
+
+The inventory execution API follows the same safety boundary as the typed
+methods: required query/body/non-standard header fields are validated before
+network I/O, standard KIS headers are filled by the client, ambiguous TR IDs
+require an explicit override, real-only endpoints are rejected in mock mode, and
+real trading mutations are locally blocked.
 
 ## Credentials And Safety
 
