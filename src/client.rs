@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Instant};
+use std::{fmt, sync::Arc, time::Instant};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -61,12 +61,27 @@ pub struct FallbackDecision {
     pub to_base_url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct AccessTokenResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: u64,
     pub access_token_token_expired: Option<String>,
+}
+
+impl fmt::Debug for AccessTokenResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AccessTokenResponse")
+            .field("access_token", &"[REDACTED]")
+            .field("token_type", &self.token_type)
+            .field("expires_in", &self.expires_in)
+            .field(
+                "access_token_token_expired",
+                &self.access_token_token_expired,
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,9 +90,18 @@ pub struct RevokeTokenResponse {
     pub message: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct RealtimeApprovalKeyResponse {
     pub approval_key: String,
+}
+
+impl fmt::Debug for RealtimeApprovalKeyResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RealtimeApprovalKeyResponse")
+            .field("approval_key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 pub struct KisClientBuilder {

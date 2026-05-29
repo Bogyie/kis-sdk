@@ -14,7 +14,7 @@ use kis_sdk::{
     fallback::FallbackPolicy,
     mock::MockServer,
     retry::RetryPolicy,
-    KisClient,
+    AccessTokenResponse, KisClient, RealtimeApprovalKeyResponse,
 };
 use serde_json::json;
 use tokio::{net::TcpListener, task::JoinHandle};
@@ -145,6 +145,26 @@ async fn client_exposes_oauth_revoke_and_realtime_approval_key() {
     assert_eq!(approval.approval_key, "kis_mock_approval_key");
 
     server.shutdown().await;
+}
+
+#[test]
+fn auth_response_debug_redacts_sensitive_values() {
+    let access_token = AccessTokenResponse {
+        access_token: "sensitive_access_token".to_string(),
+        token_type: "Bearer".to_string(),
+        expires_in: 86400,
+        access_token_token_expired: Some("2099-12-31 23:59:59".to_string()),
+    };
+    let access_token_debug = format!("{access_token:?}");
+    assert!(access_token_debug.contains("[REDACTED]"));
+    assert!(!access_token_debug.contains("sensitive_access_token"));
+
+    let approval_key = RealtimeApprovalKeyResponse {
+        approval_key: "sensitive_approval_key".to_string(),
+    };
+    let approval_key_debug = format!("{approval_key:?}");
+    assert!(approval_key_debug.contains("[REDACTED]"));
+    assert!(!approval_key_debug.contains("sensitive_approval_key"));
 }
 
 #[tokio::test]
