@@ -20,8 +20,8 @@ available as first-class Rust methods.
 
 ## Add The Dependency
 
-The crate is not published yet because `Cargo.toml` intentionally keeps
-`publish = false`. Use the repository while the project is in integration:
+If the crate is not available on crates.io yet, use the repository while the
+project is in integration:
 
 ```toml
 [dependencies]
@@ -29,7 +29,7 @@ kis-sdk = { git = "https://github.com/bogyie/kis-sdk", branch = "bog-220-kis-sdk
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-After a future authorized crates.io release, switch to a versioned dependency:
+After the first authorized crates.io release, switch to a versioned dependency:
 
 ```toml
 [dependencies]
@@ -240,8 +240,8 @@ Current package evidence:
 
 - `Cargo.toml` declares `name`, `version`, `edition`, `license`, `description`,
   `repository`, `readme`, and `keywords`.
-- `publish = false` remains set, so crates.io publishing is intentionally
-  disabled.
+- The package metadata is publishable to crates.io, while actual upload remains
+  controlled by the release workflow tag, environment, and secret gates.
 - README and this guide use placeholders only and do not contain app keys,
   access tokens, account numbers, customer data, or live order instructions.
 - Contract and mock evidence is documented in
@@ -253,12 +253,13 @@ cargo fmt --check
 cargo check
 cargo clippy --all-targets -- -D warnings
 cargo test
-cargo package
+python3 scripts/verify-crates-publishable.py
+cargo package --locked
 ```
 
 Before an authorized publish, review the generated package contents, confirm
-license-file expectations, remove `publish = false`, tag a release only if the
-release workflow allows it, and rerun the full verification suite.
+license-file expectations, tag a release only if the release workflow allows it,
+and rerun the full verification suite.
 
 ## Related Documents
 
