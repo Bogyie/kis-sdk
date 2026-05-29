@@ -14,7 +14,9 @@ The first implementation exposes:
 - Explicit `RetryPolicy` and `FallbackPolicy` options. Retry is disabled by
   default; trading POST retries are not enabled by the conservative read policy.
   Real-to-mock fallback is opt-in, read-only, and recorded on response execution
-  metadata when used.
+  metadata when used. Fallback requests require separate fallback credentials
+  and a fallback bearer token, so primary real credentials are not reused across
+  the fallback trust boundary.
 
 ## Architecture
 

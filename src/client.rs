@@ -20,6 +20,8 @@ pub struct KisClient {
     config: KisConfig,
     credentials: Option<AppCredentials>,
     static_token: Option<String>,
+    fallback_credentials: Option<AppCredentials>,
+    fallback_static_token: Option<String>,
     token_cache: Arc<Mutex<Option<CachedToken>>>,
 }
 
@@ -71,6 +73,14 @@ pub struct KisClientBuilder {
     config: KisConfig,
     credentials: Option<AppCredentials>,
     static_token: Option<String>,
+    fallback_credentials: Option<AppCredentials>,
+    fallback_static_token: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CredentialScope {
+    Primary,
+    Fallback,
 }
 
 impl KisClient {
@@ -79,6 +89,8 @@ impl KisClient {
             config: KisConfig::new(environment),
             credentials: None,
             static_token: None,
+            fallback_credentials: None,
+            fallback_static_token: None,
         }
     }
 
@@ -138,7 +150,12 @@ impl KisClient {
         let mut attempt = 1;
         loop {
             let result = self
-                .send_prepared(endpoint.operation_kind, &request, &self.config.base_url)
+                .send_prepared(
+                    endpoint.operation_kind,
+                    &request,
+                    &self.config.base_url,
+                    CredentialScope::Primary,
+                )
                 .await;
             match result {
                 Ok(mut response) => {
@@ -169,6 +186,7 @@ impl KisClient {
                             endpoint.operation_kind,
                             &fallback_request,
                             &self.config.fallback_base_url,
+                            CredentialScope::Fallback,
                         )
                         .await?;
                     response.execution.attempts = attempt;
@@ -199,6 +217,7 @@ impl KisClient {
         operation_kind: OperationKind,
         request: &PreparedRequest,
         base_url: &str,
+        credential_scope: CredentialScope,
     ) -> Result<KisEnvelope<T>, KisError>
     where
         T: DeserializeOwned,
@@ -213,16 +232,13 @@ impl KisClient {
             .query(&request.query);
 
         if operation_kind != OperationKind::Auth {
-            let credentials = self
-                .credentials
-                .as_ref()
-                .ok_or(KisError::MissingCredentials)?;
+            let credentials = self.credentials_for(credential_scope)?;
             builder = builder
                 .header("appkey", credentials.app_key())
                 .header("appsecret", credentials.app_secret())
                 .header(
                     "authorization",
-                    format!("Bearer {}", self.bearer_token().await?),
+                    self.authorization_header(credential_scope).await?,
                 )
                 .header("custtype", "P");
         }
@@ -240,6 +256,38 @@ impl KisClient {
             .await
             .map_err(|error| KisError::Transport(error.to_string()))?;
         parse_response(response).await
+    }
+
+    fn credentials_for(
+        &self,
+        credential_scope: CredentialScope,
+    ) -> Result<&AppCredentials, KisError> {
+        match credential_scope {
+            CredentialScope::Primary => self
+                .credentials
+                .as_ref()
+                .ok_or(KisError::MissingCredentials),
+            CredentialScope::Fallback => self
+                .fallback_credentials
+                .as_ref()
+                .ok_or(KisError::MissingFallbackCredentials),
+        }
+    }
+
+    async fn authorization_header(
+        &self,
+        credential_scope: CredentialScope,
+    ) -> Result<String, KisError> {
+        match credential_scope {
+            CredentialScope::Primary => Ok(format!("Bearer {}", self.bearer_token().await?)),
+            CredentialScope::Fallback => {
+                let token = self
+                    .fallback_static_token
+                    .as_ref()
+                    .ok_or(KisError::MissingFallbackCredentials)?;
+                Ok(format!("Bearer {token}"))
+            }
+        }
     }
 
     async fn bearer_token(&self) -> Result<String, KisError> {
@@ -298,6 +346,16 @@ impl KisClientBuilder {
         self
     }
 
+    pub fn fallback_credentials(mut self, credentials: AppCredentials) -> Self {
+        self.fallback_credentials = Some(credentials);
+        self
+    }
+
+    pub fn fallback_static_bearer_token(mut self, token: impl Into<String>) -> Self {
+        self.fallback_static_token = Some(token.into());
+        self
+    }
+
     pub fn build(self) -> Result<KisClient, KisError> {
         let http = reqwest::Client::builder()
             .timeout(self.config.request_timeout)
@@ -309,6 +367,8 @@ impl KisClientBuilder {
             config: self.config,
             credentials: self.credentials,
             static_token: self.static_token,
+            fallback_credentials: self.fallback_credentials,
+            fallback_static_token: self.fallback_static_token,
             token_cache: Arc::new(Mutex::new(None)),
         })
     }

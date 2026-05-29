@@ -10,6 +10,7 @@ pub enum KisError {
         environment: Environment,
     },
     MissingCredentials,
+    MissingFallbackCredentials,
     Validation(String),
     LiveTradingDisabled {
         endpoint: String,
@@ -58,6 +59,9 @@ impl fmt::Display for KisError {
                 "endpoint {endpoint} does not support {environment:?}"
             ),
             Self::MissingCredentials => formatter.write_str("KIS app credentials are required"),
+            Self::MissingFallbackCredentials => {
+                formatter.write_str("separate fallback credentials and bearer token are required")
+            }
             Self::Validation(message) => write!(formatter, "validation error: {message}"),
             Self::LiveTradingDisabled { endpoint } => write!(
                 formatter,
