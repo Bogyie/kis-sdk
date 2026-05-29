@@ -22,6 +22,10 @@ The first implementation exposes:
 
 - [ADR/RFC 0001: KIS Rust SDK Runtime Architecture](docs/adr/0001-kis-sdk-runtime-architecture.md)
 
+## Release
+
+- [Crates.io publish workflow](docs/release/crates-publish.md)
+
 ## Mock Server
 
 - [KIS Mock Server](docs/mock-server/README.md)
