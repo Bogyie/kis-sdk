@@ -31,6 +31,9 @@ more ergonomic typed wrappers.
 - Inventory-backed overseas stock API surface for 51 endpoints across
   trading/account, quotation, market-analysis, and realtime-quotation
   collections.
+- Collection-specific overseas futures/options inventory wrapper covering all
+  35 order/account, quotation, and realtime endpoints from the bundled
+  official inventory.
 - Inventory-backed `execute_inventory` support for the bundled official
   endpoint inventory, including required input/header validation and TR ID
   selection rules from the captured metadata.
@@ -109,6 +112,7 @@ The typed SDK currently exposes:
 | `inquire_domestic_stock_price` | `/uapi/domestic-stock/v1/quotations/inquire-price` | Domestic stock quote read. |
 | `inquire_domestic_stock_balance` | `/uapi/domestic-stock/v1/trading/inquire-balance` | Domestic stock balance read. |
 | `place_domestic_stock_cash_order` | `/uapi/domestic-stock/v1/trading/order-cash` | Mock cash orders are supported; real cash orders are locally blocked by `KisError::LiveTradingDisabled`. |
+| `execute_overseas_futures_options` | 35 overseas futures/options inventory endpoints | Collection-specific wrapper keyed by `OverseasFuturesOptionsEndpoint`; all bundled endpoints are real-only, required fields are validated from inventory, and real trading mutations are locally blocked. |
 
 The bundled inventory covers 338 official endpoints across 22 collections.
 Endpoints outside the typed SDK surface do not yet have ergonomic typed Rust
