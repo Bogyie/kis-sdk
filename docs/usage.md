@@ -1,9 +1,8 @@
 # KIS SDK Usage Guide
 
 This guide shows the supported `kis-sdk` workflows for the current early Rust
-implementation. It is written for application developers who want to test
-against the bundled mock server first and then wire real KIS credentials through
-their own secret-management path.
+implementation. It is written for application developers who want to wire real
+KIS credentials through their own secret-management path.
 
 The typed SDK surface currently covers OAuth token issuance and revoke,
 WebSocket approval-key issuance, domestic stock price inquiry, domestic stock
@@ -20,7 +19,6 @@ while follow-on work adds more ergonomic typed wrappers.
 - Rust 2021 toolchain.
 - Async runtime using `tokio`.
 - KIS app credentials for real API calls. Do not store these in source control.
-- A local mock server for deterministic development and tests.
 
 ## Add The Dependency
 
@@ -29,7 +27,7 @@ project is in integration:
 
 ```toml
 [dependencies]
-kis-sdk = { git = "https://github.com/bogyie/kis-sdk", branch = "bog-220-kis-sdk" }
+kis-sdk = { git = "https://github.com/bogyie/kis-sdk", branch = "main" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -37,29 +35,13 @@ After the first authorized crates.io release, switch to a versioned dependency:
 
 ```toml
 [dependencies]
-kis-sdk = "0.1"
+kis-sdk = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-## Run The Local Mock Server
+## Create A Real Read Client
 
-```sh
-cargo run --bin kis-mock-server -- 127.0.0.1:0
-```
-
-The server prints the selected local address:
-
-```text
-kis mock server listening on http://127.0.0.1:49152
-```
-
-Use the printed URL as the client `base_url`. Port `0` lets the operating system
-choose a free port, which keeps parallel tests isolated.
-
-## Create A Mock Client
-
-Mock requests still require the same header shape as KIS requests, so provide
-placeholder app credentials and a dummy bearer token:
+Load credentials outside the repository and pass them to the SDK at runtime:
 
 ```rust
 use kis_sdk::{
@@ -68,17 +50,20 @@ use kis_sdk::{
     KisClient,
 };
 
-fn mock_client(base_url: &str) -> Result<KisClient, kis_sdk::KisError> {
-    KisClient::builder(Environment::Mock)
-        .base_url(base_url)
-        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
-        .static_bearer_token("test_access_token")
-        .build()
+fn real_read_client_from_env() -> Result<KisClient, Box<dyn std::error::Error>> {
+    let app_key = std::env::var("KIS_APP_KEY")?;
+    let app_secret = std::env::var("KIS_APP_SECRET")?;
+
+    let client = KisClient::builder(Environment::Real)
+        .app_credentials(AppCredentials::new(app_key, app_secret))
+        .build()?;
+
+    Ok(client)
 }
 ```
 
-These placeholder values are for local development only. They are not real KIS
-credentials and must not be copied into production configuration.
+Do not print or persist the loaded values. Do not use production credentials in
+tests that can run on shared developer machines or public CI.
 
 ## Manage OAuth Tokens And WebSocket Approval Keys
 
@@ -199,9 +184,8 @@ The inventory layer validates required query, body, and non-standard header
 fields before network I/O. Standard KIS headers such as `appkey`, `appsecret`,
 `authorization`, `custtype`, `content-type`, and unambiguous `tr_id` values are
 filled by the client. Endpoints with ambiguous TR IDs require
-`InventoryRequest::tr_id_override(...)`. Real-only endpoints are rejected in
-`Environment::Mock`, and real trading mutations remain blocked locally by
-`KisError::LiveTradingDisabled`.
+`InventoryRequest::tr_id_override(...)`, and real trading mutations remain
+blocked locally by `KisError::LiveTradingDisabled`.
 
 ## Call An Overseas Stock Endpoint
 
@@ -281,9 +265,8 @@ environment trading mutations are blocked locally by
 ## Call A Realtime Tryitout Endpoint
 
 Realtime domain helpers use the REST-style `/tryitout/*` shape preserved in the
-official inventory and local mock contract. They are useful for mock-contract
-coverage and request validation, but they are not live WebSocket subscription
-APIs.
+official inventory. They validate the request shape for inventory-backed
+tryitout endpoints, but they are not live WebSocket subscription APIs.
 
 ```rust
 use kis_sdk::{
@@ -315,9 +298,9 @@ async fn realtime_tryitout(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::K
 
 Listed bond helpers scope inventory execution to bond trading/account,
 quotation, or realtime tryitout operation id constants. Most listed bond
-endpoints in the bundled inventory are `real_only`, so mock-mode calls return
-`KisError::UnsupportedEnvironment`; real trading mutations are still blocked
-before network I/O.
+endpoints in the bundled inventory are read-only quotation calls or guarded
+trading/account calls; real trading mutations are still blocked before network
+I/O.
 
 ```rust
 use kis_sdk::{
@@ -364,56 +347,8 @@ async fn inquire_balance(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::Kis
 Use placeholders in examples and tests. Real account identifiers are sensitive
 and should be supplied only by an approved runtime secret path.
 
-## Submit A Mock Cash Order
-
-```rust
-use kis_sdk::{
-    apis::domestic_stock::{CashOrderRequest, CashOrderSide},
-    credentials::Account,
-};
-
-async fn submit_mock_order(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
-    let account = Account::new("12345678", "01");
-    let request = CashOrderRequest::limit(&account, "005930", 1, 70_000);
-
-    let response = client
-        .place_domestic_stock_cash_order(CashOrderSide::Buy, &request)
-        .await?;
-
-    assert!(response.is_success());
-    Ok(())
-}
-```
-
 The current implementation blocks real-environment cash orders before network
-I/O with `KisError::LiveTradingDisabled`. Mock cash-order examples validate SDK
-request construction and mock contract handling; they do not place live orders.
-
-## Use Real Credentials For Read Calls
-
-For real read calls, load credentials outside the repository:
-
-```rust
-use kis_sdk::{
-    config::Environment,
-    credentials::AppCredentials,
-    KisClient,
-};
-
-fn real_read_client_from_env() -> Result<KisClient, Box<dyn std::error::Error>> {
-    let app_key = std::env::var("KIS_APP_KEY")?;
-    let app_secret = std::env::var("KIS_APP_SECRET")?;
-
-    let client = KisClient::builder(Environment::Real)
-        .app_credentials(AppCredentials::new(app_key, app_secret))
-        .build()?;
-
-    Ok(client)
-}
-```
-
-Do not print or persist the loaded values. Do not use production credentials in
-tests that can run on shared developer machines or public CI.
+I/O with `KisError::LiveTradingDisabled`.
 
 ## Configure Retry
 
@@ -422,7 +357,7 @@ Retry is disabled by default:
 ```rust
 use kis_sdk::{config::Environment, KisClient};
 
-let client = KisClient::builder(Environment::Mock).build()?;
+let client = KisClient::builder(Environment::Real).build()?;
 ```
 
 Enable conservative read retries explicitly:
@@ -438,47 +373,6 @@ let client = KisClient::builder(Environment::Real)
 `RetryPolicy::conservative_reads()` retries retryable GET/read failures. It does
 not retry trading POST mutations, which avoids hidden duplicate-write behavior.
 
-## Configure Real-To-Mock Fallback
-
-Fallback is disabled by default. Real-to-mock fallback is opt-in, read-only, and
-requires separate fallback credentials and a fallback bearer token:
-
-```rust
-use kis_sdk::{
-    config::Environment,
-    credentials::AppCredentials,
-    fallback::FallbackPolicy,
-    KisClient,
-};
-
-let client = KisClient::builder(Environment::Real)
-    .app_credentials(AppCredentials::new("<real-app-key>", "<real-app-secret>"))
-    .fallback_policy(FallbackPolicy::real_to_mock_reads())
-    .fallback_base_url("http://127.0.0.1:49152")
-    .fallback_credentials(AppCredentials::new("<mock-app-key>", "<mock-app-secret>"))
-    .fallback_static_bearer_token("mock_access_token")
-    .build()?;
-```
-
-When fallback is used, the response `execution.fallback` metadata records the
-source and target environments and base URLs. Primary real credentials are not
-sent to the fallback target.
-
-## Mock Fixture Scenarios
-
-The mock server supports deterministic scenario headers for error-path testing:
-
-| Header | Result |
-| --- | --- |
-| `x-kis-mock-scenario: unauthorized` | Unauthorized provider envelope. |
-| `x-kis-mock-scenario: rate-limit` | HTTP 429 with `retry-after: 1`. |
-| `x-kis-mock-scenario: retryable-500` | HTTP 503. |
-| `x-kis-mock-scenario: provider-error` | HTTP 200 with provider error envelope. |
-
-Routes marked `real_only` in the bundled official inventory return
-`KIS_MOCK_UNSUPPORTED_ENVIRONMENT` instead of simulating unsupported mock
-behavior.
-
 ## Package Readiness Checklist
 
 Current package evidence:
@@ -489,7 +383,7 @@ Current package evidence:
   controlled by the release workflow tag, environment, and secret gates.
 - README and this guide use placeholders only and do not contain app keys,
   access tokens, account numbers, customer data, or live order instructions.
-- Contract and mock evidence is documented in
+- Contract and test evidence is documented in
   [`contract-quality-report.md`](contract-quality-report.md).
 - The expected local verification suite is:
 
@@ -509,6 +403,5 @@ and rerun the full verification suite.
 ## Related Documents
 
 - [Repository README](../README.md)
-- [Mock server guide](mock-server/README.md)
 - [Contract quality report](contract-quality-report.md)
 - [Runtime architecture ADR/RFC](adr/0001-kis-sdk-runtime-architecture.md)
