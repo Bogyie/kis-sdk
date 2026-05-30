@@ -7,7 +7,6 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/bogyie/kis-sdk"
 readme = "README.md"
 keywords = ["kis", "korea-investment", "sdk", "openapi"]
-publish = false
 
 [lib]
 name = "kis_sdk"

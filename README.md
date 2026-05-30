@@ -12,8 +12,9 @@ current coverage boundary.
 ## Current Status
 
 - Package name: `kis-sdk`.
-- Crates.io publishing: not enabled yet. `Cargo.toml` still has
-  `publish = false` until an explicit release decision is made.
+- Crates.io publishing: package metadata is publishable, but the crate has not
+  been published yet. Actual upload still requires an authorized `v*.*.*` tag,
+  the `crates-io` environment gate, and `CARGO_REGISTRY_TOKEN`.
 - License metadata: `MIT OR Apache-2.0`.
 - Supported runtime: async Rust with `tokio`, `reqwest`, and rustls TLS.
 - Official contract snapshot: `contracts/kis_official_endpoint_inventory.compact.json`,
@@ -58,16 +59,15 @@ current coverage boundary.
 
 ## Installation
 
-The crate is not published to crates.io yet. Until publishing is authorized,
-use the repository directly:
+If the crate is not available on crates.io yet, use the repository directly:
 
 ```toml
 [dependencies]
 kis-sdk = { git = "https://github.com/bogyie/kis-sdk", branch = "bog-220-kis-sdk" }
 ```
 
-After crates.io publishing is explicitly enabled, consumers should be able to
-switch to a versioned dependency:
+After the first authorized crates.io publish completes, consumers should be able
+to switch to a versioned dependency:
 
 ```toml
 [dependencies]
@@ -305,14 +305,17 @@ mock support or explicit `KIS_MOCK_UNSUPPORTED_ENVIRONMENT` rejection.
 
 ## Package Readiness
 
-This repository is prepared for a future crates.io decision, but publishing has
-not been performed.
+This repository is prepared for an authorized crates.io publish, but publishing
+has not been performed from this branch.
 
 - `Cargo.toml` includes package name, version, edition, license, description,
-  repository, README, keywords, and `publish = false`.
+  repository, README, and keywords.
 - README and usage documentation avoid secrets and use local/mock placeholders.
 - The mock server and contract-quality report provide package validation
   evidence without live KIS credentials.
-- Before publishing, remove `publish = false` only with explicit authorization,
-  confirm license-file expectations, run `cargo package`, and review the
-  generated package contents before any upload step.
+- The publish workflow runs `scripts/verify-crates-publishable.py` before the
+  third-party publish action so `publish = false` or registry restrictions
+  cannot produce a false-positive empty publish.
+- Before publishing, confirm license-file expectations, run
+  `cargo package --locked`, review the generated package contents, and use only
+  the authorized tag/environment workflow for any upload step.
