@@ -5,11 +5,12 @@ implementation. It is written for application developers who want to test
 against the bundled mock server first and then wire real KIS credentials through
 their own secret-management path.
 
-The typed SDK surface currently covers OAuth token issuance, domestic stock
-price inquiry, domestic stock balance inquiry, and domestic stock cash-order
-requests. Domain-scoped inventory helpers cover domestic futures/options, 29
-domestic stock realtime tryitout endpoints, and 18 listed bond endpoints. The
-shared inventory-backed execution API can also call every endpoint captured in
+The typed SDK surface currently covers OAuth token issuance and revoke,
+WebSocket approval-key issuance, domestic stock price inquiry, domestic stock
+balance inquiry, and domestic stock cash-order requests. Domain-scoped
+inventory helpers cover domestic futures/options, 29 domestic stock realtime
+tryitout endpoints, and 18 listed bond endpoints. The shared inventory-backed
+execution API can also call every endpoint captured in
 `contracts/kis_official_endpoint_inventory.compact.json` by stable operation id
 while follow-on work adds more ergonomic typed wrappers.
 
@@ -77,6 +78,49 @@ fn mock_client(base_url: &str) -> Result<KisClient, kis_sdk::KisError> {
 
 These placeholder values are for local development only. They are not real KIS
 credentials and must not be copied into production configuration.
+
+## Manage OAuth Tokens And WebSocket Approval Keys
+
+Use `issue_access_token` when the application needs to fetch an OAuth bearer
+token directly:
+
+```rust
+async fn issue_token(client: &kis_sdk::KisClient) -> Result<String, kis_sdk::KisError> {
+    let token = client.issue_access_token().await?;
+    Ok(token.access_token)
+}
+```
+
+Use `revoke_access_token` to explicitly revoke a token. The SDK validates that
+the token is not blank before network I/O, and it never revokes tokens
+implicitly when a client is dropped:
+
+```rust
+async fn revoke_token(
+    client: &kis_sdk::KisClient,
+    token: &str,
+) -> Result<(), kis_sdk::KisError> {
+    let response = client.revoke_access_token(token).await?;
+    assert_eq!(response.code, 200);
+    Ok(())
+}
+```
+
+Use `issue_realtime_approval_key` to issue the `/oauth2/Approval` access key
+needed by KIS WebSocket clients:
+
+```rust
+async fn websocket_approval_key(
+    client: &kis_sdk::KisClient,
+) -> Result<String, kis_sdk::KisError> {
+    let response = client.issue_realtime_approval_key().await?;
+    Ok(response.approval_key)
+}
+```
+
+This method only issues the WebSocket approval key. The current typed SDK API
+does not manage live WebSocket sessions, subscriptions, reconnect behavior, or
+message decoding.
 
 ## Inquire A Domestic Stock Price
 

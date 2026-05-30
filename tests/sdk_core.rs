@@ -27,7 +27,7 @@ use kis_sdk::{
     fallback::FallbackPolicy,
     mock::MockServer,
     retry::RetryPolicy,
-    KisClient,
+    AccessTokenResponse, KisClient, RealtimeApprovalKeyResponse,
 };
 use serde_json::json;
 use tokio::{net::TcpListener, task::JoinHandle};
@@ -335,6 +335,87 @@ fn assert_domain_operations(
             .unwrap_or_else(|| panic!("{operation_id} must exist in inventory catalog"));
         assert_eq!(endpoint.collection_name, collection_name);
     }
+}
+
+#[tokio::test]
+async fn client_exposes_oauth_revoke_and_realtime_approval_key() {
+    let server = MockServer::start().await.expect("mock server starts");
+    let client = KisClient::builder(Environment::Mock)
+        .base_url(server.base_url())
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .build()
+        .expect("client builds");
+
+    let revoked = client
+        .revoke_access_token("test_access_token")
+        .await
+        .expect("token revoke succeeds");
+    assert_eq!(revoked.code, 200);
+    assert_eq!(revoked.message, "revoked");
+
+    let approval = client
+        .issue_realtime_approval_key()
+        .await
+        .expect("approval key issuance succeeds");
+    assert_eq!(approval.approval_key, "kis_mock_approval_key");
+
+    server.shutdown().await;
+}
+
+#[test]
+fn auth_response_debug_redacts_sensitive_values() {
+    let access_token = AccessTokenResponse {
+        access_token: "sensitive_access_token".to_string(),
+        token_type: "Bearer".to_string(),
+        expires_in: 86400,
+        access_token_token_expired: Some("2099-12-31 23:59:59".to_string()),
+    };
+    let access_token_debug = format!("{access_token:?}");
+    assert!(access_token_debug.contains("[REDACTED]"));
+    assert!(!access_token_debug.contains("sensitive_access_token"));
+
+    let approval_key = RealtimeApprovalKeyResponse {
+        approval_key: "sensitive_approval_key".to_string(),
+    };
+    let approval_key_debug = format!("{approval_key:?}");
+    assert!(approval_key_debug.contains("[REDACTED]"));
+    assert!(!approval_key_debug.contains("sensitive_approval_key"));
+}
+
+#[tokio::test]
+async fn oauth_revoke_rejects_empty_token_before_network() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .revoke_access_token("   ")
+        .await
+        .expect_err("empty revoke token should fail locally");
+
+    assert!(matches!(error, KisError::Validation(_)));
+}
+
+#[tokio::test]
+async fn oauth_revoke_and_approval_require_app_credentials_before_network() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .build()
+        .expect("client builds");
+
+    let revoke_error = client
+        .revoke_access_token("test_access_token")
+        .await
+        .expect_err("revoke should require credentials");
+    assert!(matches!(revoke_error, KisError::MissingCredentials));
+
+    let approval_error = client
+        .issue_realtime_approval_key()
+        .await
+        .expect_err("approval key should require credentials");
+    assert!(matches!(approval_error, KisError::MissingCredentials));
 }
 
 #[tokio::test]
