@@ -4,16 +4,18 @@ use axum::{
     Json, Router,
 };
 use kis_sdk::{
-    apis::overseas_futures_options::OverseasFuturesOptionsEndpoint,
     apis::{
         bond::{
             self, BOND_QUOTATION_OPERATIONS, BOND_REALTIME_TRYITOUT_OPERATIONS,
             BOND_TRADING_ACCOUNT_OPERATIONS,
         },
         domestic_stock::{
-            CashOrderRequest, CashOrderSide, InquireBalanceRequest, InquirePriceRequest,
+            domestic_stock_rest_endpoints, CashOrderRequest, CashOrderSide, InquireBalanceRequest,
+            InquirePriceRequest, DOMESTIC_STOCK_REST_COLLECTIONS,
+            DOMESTIC_STOCK_REST_ENDPOINT_COUNT,
         },
         domestic_stock_realtime::{self, DOMESTIC_STOCK_REALTIME_TRYITOUT_OPERATIONS},
+        overseas_futures_options::OverseasFuturesOptionsEndpoint,
         overseas_stock::{
             OverseasStockEndpoint, MARKET_ANALYSIS_ENDPOINTS, QUOTATION_ENDPOINTS,
             REALTIME_QUOTATION_ENDPOINTS, TRADING_ACCOUNT_ENDPOINTS,
@@ -22,15 +24,15 @@ use kis_sdk::{
     config::Environment,
     contract::EnvironmentSupport,
     credentials::{Account, AppCredentials, SecretString},
-    endpoint::{InventoryCatalog, InventoryRequest, OperationKind},
+    endpoint::{InventoryCatalog, InventoryEndpointSpec, InventoryRequest, OperationKind},
     error::KisError,
     fallback::FallbackPolicy,
     mock::MockServer,
     retry::RetryPolicy,
-    KisClient,
+    AccessTokenResponse, KisClient, RealtimeApprovalKeyResponse,
 };
-use serde_json::json;
-use std::collections::HashSet;
+use serde_json::{json, Map, Value};
+use std::collections::{BTreeMap, HashSet};
 use tokio::{net::TcpListener, task::JoinHandle};
 
 #[tokio::test]
@@ -472,6 +474,187 @@ async fn inventory_execute_calls_mocked_endpoint_by_operation_id() {
     server.shutdown().await;
 }
 
+#[test]
+fn domestic_stock_rest_catalog_covers_listed_inventory_collections() {
+    let endpoints = domestic_stock_rest_endpoints().expect("domestic stock REST catalog builds");
+
+    assert_eq!(endpoints.len(), DOMESTIC_STOCK_REST_ENDPOINT_COUNT);
+
+    let mut by_collection = BTreeMap::new();
+    for endpoint in &endpoints {
+        assert!(
+            DOMESTIC_STOCK_REST_COLLECTIONS.contains(&endpoint.collection_name.as_str()),
+            "{} must stay inside listed domestic stock REST collections",
+            endpoint.operation_id
+        );
+        assert!(
+            !endpoint.collection_name.contains("실시간시세"),
+            "{} must not include realtime websocket coverage",
+            endpoint.operation_id
+        );
+        *by_collection
+            .entry(endpoint.collection_name.as_str())
+            .or_insert(0usize) += 1;
+    }
+
+    assert_eq!(by_collection["[국내주식] 주문/계좌"], 23);
+    assert_eq!(by_collection["[국내주식] 기본시세"], 22);
+    assert_eq!(by_collection["[국내주식] ELW 시세"], 22);
+    assert_eq!(by_collection["[국내주식] 업종/기타"], 14);
+    assert_eq!(by_collection["[국내주식] 종목정보"], 26);
+    assert_eq!(by_collection["[국내주식] 시세분석"], 29);
+    assert_eq!(by_collection["[국내주식] 순위분석"], 22);
+}
+
+#[tokio::test]
+async fn domestic_stock_rest_execute_covers_listed_inventory_against_mock_contract() {
+    let endpoints = domestic_stock_rest_endpoints().expect("domestic stock REST catalog builds");
+    let server = MockServer::start().await.expect("mock server starts");
+    let client = KisClient::builder(Environment::Mock)
+        .base_url(server.base_url())
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let mut real_mock_successes = 0;
+    let mut real_only_rejections = 0;
+
+    for endpoint in &endpoints {
+        let request = inventory_request_for_endpoint(endpoint);
+        let result = client
+            .execute_domestic_stock_rest::<serde_json::Value>(&endpoint.operation_id, request)
+            .await;
+
+        match endpoint.env_support {
+            EnvironmentSupport::RealOnly => {
+                assert!(
+                    matches!(result, Err(KisError::UnsupportedEnvironment { .. })),
+                    "{} must reject real-only endpoints in mock before network",
+                    endpoint.operation_id
+                );
+                real_only_rejections += 1;
+            }
+            EnvironmentSupport::RealMock => {
+                let response = result.unwrap_or_else(|error| {
+                    panic!(
+                        "{} should execute against mock: {error:?}",
+                        endpoint.operation_id
+                    )
+                });
+                assert!(response.is_success(), "{}", endpoint.operation_id);
+                real_mock_successes += 1;
+            }
+        }
+    }
+
+    assert_eq!(real_mock_successes, 18);
+    assert_eq!(real_only_rejections, 140);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn domestic_stock_rest_execute_rejects_out_of_scope_operation_ids() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_domestic_stock_rest::<serde_json::Value>(
+            "domestic_stock_realtime_quotation.post_tryitout_h0stcnt0",
+            InventoryRequest::new(),
+        )
+        .await
+        .expect_err("realtime operation should stay out of REST coverage");
+
+    assert!(matches!(error, KisError::Contract(_)));
+}
+
+fn inventory_request_for_endpoint(endpoint: &InventoryEndpointSpec) -> InventoryRequest {
+    let mut request = InventoryRequest::new();
+
+    let mut query = Map::new();
+    for field in &endpoint.required_query {
+        query.insert(field.clone(), Value::String(value_for_field(field)));
+    }
+    if endpoint.method == http::Method::GET {
+        for field in &endpoint.required_body {
+            query.insert(field.clone(), Value::String(value_for_field(field)));
+        }
+    }
+    if !query.is_empty() {
+        request = request.query(Value::Object(query));
+    }
+
+    if endpoint.method != http::Method::GET {
+        let mut body = Map::new();
+        for field in &endpoint.required_body {
+            body.insert(field.clone(), Value::String(value_for_field(field)));
+        }
+        request = request.body(Value::Object(body));
+    }
+
+    for header in &endpoint.required_headers {
+        if !is_auto_header(header) {
+            request = request.header(header, "kis_mock_value");
+        }
+    }
+
+    if endpoint
+        .default_mock_tr_id
+        .as_deref()
+        .or(endpoint.default_real_tr_id.as_deref())
+        .is_some_and(|tr_id| !is_single_tr_id(tr_id))
+    {
+        request = request.tr_id_override(first_tr_id(endpoint).unwrap_or("KISMOCK0000"));
+    }
+
+    request
+}
+
+fn value_for_field(field: &str) -> String {
+    match field.to_ascii_uppercase().as_str() {
+        "CANO" => "12345678".to_string(),
+        "ACNT_PRDT_CD" => "01".to_string(),
+        "PDNO" | "FID_INPUT_ISCD" | "MKSC_SHRN_ISCD" => "005930".to_string(),
+        "ORD_QTY" => "1".to_string(),
+        "ORD_UNPR" => "70000".to_string(),
+        _ if field.to_ascii_uppercase().contains("DATE") || field.ends_with("_DT") => {
+            "20260529".to_string()
+        }
+        _ => "0".to_string(),
+    }
+}
+
+fn first_tr_id(endpoint: &InventoryEndpointSpec) -> Option<&str> {
+    endpoint
+        .default_mock_tr_id
+        .as_deref()
+        .or(endpoint.default_real_tr_id.as_deref())
+        .and_then(|value| {
+            value
+                .split(|ch: char| !(ch.is_ascii_uppercase() || ch.is_ascii_digit()))
+                .find(|candidate| !candidate.is_empty())
+        })
+}
+
+fn is_auto_header(header: &str) -> bool {
+    matches!(
+        header.to_ascii_lowercase().as_str(),
+        "authorization" | "appkey" | "appsecret" | "content-type" | "custtype" | "tr_id"
+    )
+}
+
+fn is_single_tr_id(value: &str) -> bool {
+    value
+        .chars()
+        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit())
+}
+
 fn assert_domain_operations(
     catalog: &InventoryCatalog,
     collection_name: &str,
@@ -493,6 +676,87 @@ fn assert_domain_operations(
             .unwrap_or_else(|| panic!("{operation_id} must exist in inventory catalog"));
         assert_eq!(endpoint.collection_name, collection_name);
     }
+}
+
+#[tokio::test]
+async fn client_exposes_oauth_revoke_and_realtime_approval_key() {
+    let server = MockServer::start().await.expect("mock server starts");
+    let client = KisClient::builder(Environment::Mock)
+        .base_url(server.base_url())
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .build()
+        .expect("client builds");
+
+    let revoked = client
+        .revoke_access_token("test_access_token")
+        .await
+        .expect("token revoke succeeds");
+    assert_eq!(revoked.code, 200);
+    assert_eq!(revoked.message, "revoked");
+
+    let approval = client
+        .issue_realtime_approval_key()
+        .await
+        .expect("approval key issuance succeeds");
+    assert_eq!(approval.approval_key, "kis_mock_approval_key");
+
+    server.shutdown().await;
+}
+
+#[test]
+fn auth_response_debug_redacts_sensitive_values() {
+    let access_token = AccessTokenResponse {
+        access_token: "sensitive_access_token".to_string(),
+        token_type: "Bearer".to_string(),
+        expires_in: 86400,
+        access_token_token_expired: Some("2099-12-31 23:59:59".to_string()),
+    };
+    let access_token_debug = format!("{access_token:?}");
+    assert!(access_token_debug.contains("[REDACTED]"));
+    assert!(!access_token_debug.contains("sensitive_access_token"));
+
+    let approval_key = RealtimeApprovalKeyResponse {
+        approval_key: "sensitive_approval_key".to_string(),
+    };
+    let approval_key_debug = format!("{approval_key:?}");
+    assert!(approval_key_debug.contains("[REDACTED]"));
+    assert!(!approval_key_debug.contains("sensitive_approval_key"));
+}
+
+#[tokio::test]
+async fn oauth_revoke_rejects_empty_token_before_network() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .revoke_access_token("   ")
+        .await
+        .expect_err("empty revoke token should fail locally");
+
+    assert!(matches!(error, KisError::Validation(_)));
+}
+
+#[tokio::test]
+async fn oauth_revoke_and_approval_require_app_credentials_before_network() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .build()
+        .expect("client builds");
+
+    let revoke_error = client
+        .revoke_access_token("test_access_token")
+        .await
+        .expect_err("revoke should require credentials");
+    assert!(matches!(revoke_error, KisError::MissingCredentials));
+
+    let approval_error = client
+        .issue_realtime_approval_key()
+        .await
+        .expect_err("approval key should require credentials");
+    assert!(matches!(approval_error, KisError::MissingCredentials));
 }
 
 #[tokio::test]

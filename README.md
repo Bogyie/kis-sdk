@@ -24,8 +24,9 @@ more ergonomic typed wrappers.
 - `KisClient` builder with explicit real/mock environment selection and shared
   `reqwest` client reuse.
 - Redacted `AppCredentials`, `Account`, and `SecretString` helpers.
-- OAuth token issuance and in-memory token reuse, with static bearer token
-  injection for tests and mock workflows.
+- OAuth token issuance, token revoke, and WebSocket approval-key issuance, with
+  in-memory token reuse and static bearer token injection for tests and mock
+  workflows.
 - Typed domestic stock methods for quotation price, balance inquiry, and cash
   order calls.
 - Inventory-backed overseas stock API surface for 51 endpoints across
@@ -39,6 +40,9 @@ more ergonomic typed wrappers.
 - Inventory-backed `execute_inventory` support for the bundled official
   endpoint inventory, including required input/header validation and TR ID
   selection rules from the captured metadata.
+- Domestic stock REST `execute_domestic_stock_rest` support for the 158 listed
+  endpoints across the domestic stock trading/account, quotation, ELW,
+  sector/misc, product info, market analysis, and ranking analysis collections.
 - Local mock server generated from the bundled official endpoint inventory.
 - Explicit `RetryPolicy` and `FallbackPolicy` options. Retry is disabled by
   default. `RetryPolicy::conservative_reads()` retries retryable GET/read
@@ -111,6 +115,8 @@ The typed SDK currently exposes:
 | Method | KIS path | Notes |
 | --- | --- | --- |
 | `issue_access_token` | `/oauth2/tokenP` | OAuth token issuance and in-memory token reuse. |
+| `revoke_access_token` | `/oauth2/revokeP` | Explicit OAuth access-token revoke; never called implicitly on drop. |
+| `issue_realtime_approval_key` | `/oauth2/Approval` | Issues a WebSocket access approval key only; live WebSocket subscription management is outside the current typed API. |
 | `inquire_domestic_stock_price` | `/uapi/domestic-stock/v1/quotations/inquire-price` | Domestic stock quote read. |
 | `inquire_domestic_stock_balance` | `/uapi/domestic-stock/v1/trading/inquire-balance` | Domestic stock balance read. |
 | `place_domestic_stock_cash_order` | `/uapi/domestic-stock/v1/trading/order-cash` | Mock cash orders are supported; real cash orders are locally blocked by `KisError::LiveTradingDisabled`. |
@@ -131,6 +137,24 @@ use serde_json::json;
 
 let response = client
     .execute_inventory::<serde_json::Value>(
+        "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
+        InventoryRequest::new().query(json!({
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": "005930"
+        })),
+    )
+    .await?;
+```
+
+For domestic stock REST coverage, prefer the scoped helper when the operation
+must stay inside the listed domestic stock REST collections:
+
+```rust
+use kis_sdk::endpoint::InventoryRequest;
+use serde_json::json;
+
+let response = client
+    .execute_domestic_stock_rest::<serde_json::Value>(
         "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
         InventoryRequest::new().query(json!({
             "FID_COND_MRKT_DIV_CODE": "J",
