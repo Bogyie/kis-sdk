@@ -11,6 +11,7 @@ ergonomic typed wrappers without changing the current coverage boundary.
 ## Current Status
 
 - Package name: `kis-sdk`.
+- Current package version: `0.2.1`.
 - Crates.io publishing: package metadata is publishable, but the crate has not
   been published yet. Actual upload still requires an authorized `v*.*.*` tag,
   the `crates-io` environment gate, and `CARGO_REGISTRY_TOKEN`.
@@ -25,7 +26,8 @@ ergonomic typed wrappers without changing the current coverage boundary.
 
 - `KisClient` builder with explicit environment selection and shared `reqwest`
   client reuse.
-- Redacted `AppCredentials`, `Account`, and `SecretString` helpers.
+- Redacted `AppCredentials`, `Account`, `AccountProductCode`, and
+  `SecretString` helpers.
 - OAuth token issuance, token revoke, and WebSocket approval-key issuance, with
   in-memory token reuse and static bearer token injection for tests.
 - Typed domestic stock methods for quotation price, balance inquiry, and cash
@@ -34,9 +36,11 @@ ergonomic typed wrappers without changing the current coverage boundary.
   trading/account, quotation, market-analysis, and realtime-quotation
   collections.
 - Domain-scoped domestic futures/options inventory methods for 44
-  order/account, quotation, and realtime quotation endpoints.
+  order/account, quotation, and realtime quotation endpoints, with typed
+  operation-id newtypes for safer call sites.
 - Domain-scoped inventory helpers for 29 domestic stock realtime tryitout
-  endpoints and 18 listed bond endpoints.
+  endpoints and 18 listed bond endpoints, with typed operation-id newtypes
+  available alongside the legacy string constants.
 - Collection-specific overseas futures/options inventory wrapper covering all
   35 order/account, quotation, and realtime endpoints from the bundled
   official inventory.
@@ -71,7 +75,7 @@ kis-sdk = "0.2"
 
 ```rust
 use kis_sdk::{
-    apis::domestic_stock::InquirePriceRequest,
+    apis::domestic_stock::{DomesticStockMarketDivision, InquirePriceRequest},
     config::Environment,
     credentials::AppCredentials,
     KisClient,
@@ -87,7 +91,10 @@ async fn main() -> Result<(), kis_sdk::KisError> {
         .build()?;
 
     let quote = client
-        .inquire_domestic_stock_price(&InquirePriceRequest::new("005930"))
+        .inquire_domestic_stock_price(&InquirePriceRequest::with_market(
+            DomesticStockMarketDivision::Stock,
+            "005930",
+        ))
         .await?;
 
     assert!(quote.is_success());
@@ -120,6 +127,22 @@ The typed SDK currently exposes:
 | `execute_bond_quotation` | `/uapi/domestic-bond/v1/quotations/*` | Domain-scoped inventory execution for 8 listed bond quotation endpoints. |
 | `execute_bond_realtime_tryitout` | `/tryitout/*` | Domain-scoped inventory execution for 3 listed bond realtime tryitout endpoints. This is not a live WebSocket subscription API. |
 | `execute_overseas_futures_options` | 35 overseas futures/options inventory endpoints | Collection-specific wrapper keyed by `OverseasFuturesOptionsEndpoint`; all bundled endpoints are real-only, required fields are validated from inventory, and real trading mutations are locally blocked. |
+
+For new call sites, prefer the typed variants where they exist:
+`Account::domestic_stock`, `InquirePriceRequest::with_market`,
+`CashOrderRequest::with_order_division`,
+`execute_domestic_stock_realtime_tryitout_operation`,
+`execute_bond_*_operation`, and
+`execute_domestic_futures_options_operation`. The older `String` fields,
+string constants, and `&str` operation-id methods remain available for
+compatibility.
+
+Typed helpers still serialize to the exact KIS wire values. For example,
+`AccountProductCode::DomesticStock` serializes to `01`,
+`DomesticStockMarketDivision::Stock` serializes to `J`, and
+`CashOrderDivision::Limit` serializes to `00`. Operation newtypes expose their
+stable inventory operation id through `operation_id()` and reject out-of-scope
+strings through `FromStr`.
 
 The domestic futures/options SDK surface exposes inventory-backed domain
 methods for all 44 endpoints in these bundled official collections:

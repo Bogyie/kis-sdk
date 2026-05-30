@@ -111,11 +111,14 @@ message decoding.
 ## Inquire A Domestic Stock Price
 
 ```rust
-use kis_sdk::apis::domestic_stock::InquirePriceRequest;
+use kis_sdk::apis::domestic_stock::{DomesticStockMarketDivision, InquirePriceRequest};
 
 async fn inquire_price(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
     let response = client
-        .inquire_domestic_stock_price(&InquirePriceRequest::new("005930"))
+        .inquire_domestic_stock_price(&InquirePriceRequest::with_market(
+            DomesticStockMarketDivision::Stock,
+            "005930",
+        ))
         .await?;
 
     if response.is_success() {
@@ -128,6 +131,21 @@ async fn inquire_price(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisEr
 
 The current output type preserves provider fields as `serde_json::Value` so the
 SDK can expose the endpoint before broad typed response structs are finalized.
+
+## Prefer Typed KIS Code Helpers
+
+Prefer typed helpers where the SDK exposes them. They keep call sites away from
+mistyped fixed KIS strings while preserving the provider wire values:
+
+- `Account::domestic_stock(...)` fills account product code `01`.
+- `DomesticStockMarketDivision::Stock` serializes to `J`.
+- `CashOrderDivision::Limit` serializes to `00`.
+- Bond, domestic stock realtime, and domestic futures/options operation
+  newtypes expose valid inventory ids through `operation_id()` and reject
+  out-of-scope strings through `FromStr`.
+
+Existing string constants and `&str` methods remain available for compatibility,
+but new code should prefer typed constructors and `*_operation` methods.
 
 ## Call An Inventory Endpoint
 
@@ -233,7 +251,9 @@ realtime quotation endpoints. The operation id constants are available from
 
 ```rust
 use kis_sdk::{
-    apis::domestic_futures_options::QUOTATION_OPERATION_IDS,
+    apis::domestic_futures_options::{
+        DomesticFuturesOptionsOperation, QUOTATION_OPERATION_IDS,
+    },
     endpoint::InventoryRequest,
 };
 use serde_json::json;
@@ -241,9 +261,10 @@ use serde_json::json;
 async fn domestic_futures_options_quote(
     client: &kis_sdk::KisClient,
 ) -> Result<(), kis_sdk::KisError> {
+    let operation = DomesticFuturesOptionsOperation::from_static(QUOTATION_OPERATION_IDS[0])?;
     let response = client
-        .execute_domestic_futures_options_quotation::<serde_json::Value>(
-            QUOTATION_OPERATION_IDS[0],
+        .execute_domestic_futures_options_operation::<serde_json::Value>(
+            operation,
             InventoryRequest::new().query(json!({
                 "FID_COND_MRKT_DIV_CODE": "F",
                 "FID_INPUT_ISCD": "101W09"
@@ -270,15 +291,15 @@ tryitout endpoints, but they are not live WebSocket subscription APIs.
 
 ```rust
 use kis_sdk::{
-    apis::domestic_stock_realtime,
+    apis::domestic_stock_realtime::DomesticStockRealtimeOperation,
     endpoint::InventoryRequest,
 };
 use serde_json::json;
 
 async fn realtime_tryitout(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
     let response = client
-        .execute_domestic_stock_realtime_tryitout::<serde_json::Value>(
-            domestic_stock_realtime::REALTIME_TRADE_KRX,
+        .execute_domestic_stock_realtime_tryitout_operation::<serde_json::Value>(
+            DomesticStockRealtimeOperation::REALTIME_TRADE_KRX,
             InventoryRequest::new()
                 .header("approval_key", "test_approval_key")
                 .header("tr_type", "1")
@@ -304,15 +325,15 @@ I/O.
 
 ```rust
 use kis_sdk::{
-    apis::bond,
+    apis::bond::BondQuotationOperation,
     endpoint::InventoryRequest,
 };
 use serde_json::json;
 
 async fn bond_price(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
     let response = client
-        .execute_bond_quotation::<serde_json::Value>(
-            bond::INQUIRE_PRICE,
+        .execute_bond_quotation_operation::<serde_json::Value>(
+            BondQuotationOperation::INQUIRE_PRICE,
             InventoryRequest::new().query(json!({
                 "FID_COND_MRKT_DIV_CODE": "B",
                 "FID_INPUT_ISCD": "KR103502GA34"
@@ -334,7 +355,7 @@ use kis_sdk::{
 };
 
 async fn inquire_balance(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
-    let account = Account::new("12345678", "01");
+    let account = Account::domestic_stock("12345678");
     let response = client
         .inquire_domestic_stock_balance(&InquireBalanceRequest::new(&account))
         .await?;

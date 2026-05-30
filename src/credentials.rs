@@ -1,4 +1,7 @@
-use std::fmt;
+use serde::Serialize;
+use std::{fmt, str::FromStr};
+
+use crate::error::KisError;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct SecretString(String);
@@ -42,6 +45,47 @@ impl AppCredentials {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum AccountProductCode {
+    DomesticStock,
+}
+
+impl AccountProductCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DomesticStock => "01",
+        }
+    }
+}
+
+impl fmt::Display for AccountProductCode {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for AccountProductCode {
+    type Err = KisError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "01" => Ok(Self::DomesticStock),
+            other => Err(KisError::Validation(format!(
+                "{other} is not a supported account product code"
+            ))),
+        }
+    }
+}
+
+impl Serialize for AccountProductCode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Account {
     cano: SecretString,
@@ -54,6 +98,14 @@ impl Account {
             cano: SecretString::new(cano),
             product_code: product_code.into(),
         }
+    }
+
+    pub fn with_product_code(cano: impl Into<String>, product_code: AccountProductCode) -> Self {
+        Self::new(cano, product_code.as_str())
+    }
+
+    pub fn domestic_stock(cano: impl Into<String>) -> Self {
+        Self::with_product_code(cano, AccountProductCode::DomesticStock)
     }
 
     pub(crate) fn cano(&self) -> &str {

@@ -1,4 +1,5 @@
 use serde::de::DeserializeOwned;
+use std::{fmt, str::FromStr};
 
 use crate::{
     client::{KisClient, KisEnvelope},
@@ -88,7 +89,84 @@ pub const DOMESTIC_STOCK_REALTIME_TRYITOUT_OPERATIONS: [&str; 29] = [
     REALTIME_MARKET_OPERATION_NXT,
 ];
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct DomesticStockRealtimeOperation(&'static str);
+
+impl DomesticStockRealtimeOperation {
+    pub const REALTIME_TRADE_KRX: Self = Self(REALTIME_TRADE_KRX);
+    pub const REALTIME_ASKING_PRICE_KRX: Self = Self(REALTIME_ASKING_PRICE_KRX);
+    pub const REALTIME_EXECUTION_NOTICE: Self = Self(REALTIME_EXECUTION_NOTICE);
+    pub const REALTIME_EXPECTED_EXECUTION_KRX: Self = Self(REALTIME_EXPECTED_EXECUTION_KRX);
+    pub const REALTIME_MEMBER_KRX: Self = Self(REALTIME_MEMBER_KRX);
+    pub const REALTIME_PROGRAM_TRADE_KRX: Self = Self(REALTIME_PROGRAM_TRADE_KRX);
+    pub const REALTIME_MARKET_OPERATION_KRX: Self = Self(REALTIME_MARKET_OPERATION_KRX);
+    pub const AFTER_HOURS_REALTIME_ASKING_PRICE_KRX: Self =
+        Self(AFTER_HOURS_REALTIME_ASKING_PRICE_KRX);
+    pub const AFTER_HOURS_REALTIME_TRADE_KRX: Self = Self(AFTER_HOURS_REALTIME_TRADE_KRX);
+    pub const AFTER_HOURS_EXPECTED_EXECUTION_KRX: Self = Self(AFTER_HOURS_EXPECTED_EXECUTION_KRX);
+    pub const INDEX_REALTIME_TRADE: Self = Self(INDEX_REALTIME_TRADE);
+    pub const INDEX_EXPECTED_EXECUTION: Self = Self(INDEX_EXPECTED_EXECUTION);
+    pub const INDEX_PROGRAM_TRADE: Self = Self(INDEX_PROGRAM_TRADE);
+    pub const ELW_REALTIME_ASKING_PRICE: Self = Self(ELW_REALTIME_ASKING_PRICE);
+    pub const ELW_REALTIME_TRADE: Self = Self(ELW_REALTIME_TRADE);
+    pub const ELW_EXPECTED_EXECUTION: Self = Self(ELW_EXPECTED_EXECUTION);
+    pub const ETF_NAV_TREND: Self = Self(ETF_NAV_TREND);
+    pub const REALTIME_TRADE_INTEGRATED: Self = Self(REALTIME_TRADE_INTEGRATED);
+    pub const REALTIME_ASKING_PRICE_INTEGRATED: Self = Self(REALTIME_ASKING_PRICE_INTEGRATED);
+    pub const REALTIME_EXPECTED_EXECUTION_INTEGRATED: Self =
+        Self(REALTIME_EXPECTED_EXECUTION_INTEGRATED);
+    pub const REALTIME_MEMBER_INTEGRATED: Self = Self(REALTIME_MEMBER_INTEGRATED);
+    pub const REALTIME_PROGRAM_TRADE_INTEGRATED: Self = Self(REALTIME_PROGRAM_TRADE_INTEGRATED);
+    pub const REALTIME_MARKET_OPERATION_INTEGRATED: Self =
+        Self(REALTIME_MARKET_OPERATION_INTEGRATED);
+    pub const REALTIME_TRADE_NXT: Self = Self(REALTIME_TRADE_NXT);
+    pub const REALTIME_ASKING_PRICE_NXT: Self = Self(REALTIME_ASKING_PRICE_NXT);
+    pub const REALTIME_EXPECTED_EXECUTION_NXT: Self = Self(REALTIME_EXPECTED_EXECUTION_NXT);
+    pub const REALTIME_MEMBER_NXT: Self = Self(REALTIME_MEMBER_NXT);
+    pub const REALTIME_PROGRAM_TRADE_NXT: Self = Self(REALTIME_PROGRAM_TRADE_NXT);
+    pub const REALTIME_MARKET_OPERATION_NXT: Self = Self(REALTIME_MARKET_OPERATION_NXT);
+
+    pub fn operation_id(self) -> &'static str {
+        self.0
+    }
+}
+
+impl fmt::Display for DomesticStockRealtimeOperation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.operation_id())
+    }
+}
+
+impl FromStr for DomesticStockRealtimeOperation {
+    type Err = KisError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        DOMESTIC_STOCK_REALTIME_TRYITOUT_OPERATIONS
+            .iter()
+            .copied()
+            .find(|candidate| *candidate == value)
+            .map(Self)
+            .ok_or_else(|| {
+                KisError::Validation(format!(
+                    "{value} is not a domestic stock realtime tryitout operation"
+                ))
+            })
+    }
+}
+
 impl KisClient {
+    pub async fn execute_domestic_stock_realtime_tryitout_operation<T>(
+        &self,
+        operation: DomesticStockRealtimeOperation,
+        request: InventoryRequest,
+    ) -> Result<KisEnvelope<T>, KisError>
+    where
+        T: DeserializeOwned,
+    {
+        self.execute_domestic_stock_realtime_tryitout(operation.operation_id(), request)
+            .await
+    }
+
     pub async fn execute_domestic_stock_realtime_tryitout<T>(
         &self,
         operation_id: &str,
