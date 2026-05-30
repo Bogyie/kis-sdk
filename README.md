@@ -30,6 +30,9 @@ more ergonomic typed wrappers.
   order calls.
 - Domain-scoped domestic futures/options inventory methods for 44
   order/account, quotation, and realtime quotation endpoints.
+- Collection-specific overseas futures/options inventory wrapper covering all
+  35 order/account, quotation, and realtime endpoints from the bundled
+  official inventory.
 - Inventory-backed `execute_inventory` support for the bundled official
   endpoint inventory, including required input/header validation and TR ID
   selection rules from the captured metadata.
@@ -108,6 +111,7 @@ The typed SDK currently exposes:
 | `inquire_domestic_stock_price` | `/uapi/domestic-stock/v1/quotations/inquire-price` | Domestic stock quote read. |
 | `inquire_domestic_stock_balance` | `/uapi/domestic-stock/v1/trading/inquire-balance` | Domestic stock balance read. |
 | `place_domestic_stock_cash_order` | `/uapi/domestic-stock/v1/trading/order-cash` | Mock cash orders are supported; real cash orders are locally blocked by `KisError::LiveTradingDisabled`. |
+| `execute_overseas_futures_options` | 35 overseas futures/options inventory endpoints | Collection-specific wrapper keyed by `OverseasFuturesOptionsEndpoint`; all bundled endpoints are real-only, required fields are validated from inventory, and real trading mutations are locally blocked. |
 
 The domestic futures/options SDK surface exposes inventory-backed domain
 methods for all 44 endpoints in these bundled official collections:
@@ -124,9 +128,10 @@ The same endpoints are also available through the combined
 QUOTATION_OPERATION_IDS, REALTIME_QUOTATION_OPERATION_IDS}`.
 
 The bundled inventory covers 338 official endpoints across 22 collections.
-Endpoints outside the typed SDK surface do not yet have ergonomic typed Rust
-request methods, but they can be addressed and called through the lower-level
-inventory execution API with stable operation ids:
+Endpoints outside the typed domestic stock methods and domain-scoped
+futures/options surfaces do not yet have ergonomic typed Rust request methods,
+but they can be addressed and called through the lower-level inventory
+execution API with stable operation ids:
 
 ```rust
 use kis_sdk::endpoint::InventoryRequest;
