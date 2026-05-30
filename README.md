@@ -30,6 +30,9 @@ more ergonomic typed wrappers.
   order calls.
 - Domain-scoped inventory helpers for 29 domestic stock realtime tryitout
   endpoints and 18 listed bond endpoints.
+- Collection-specific overseas futures/options inventory wrapper covering all
+  35 order/account, quotation, and realtime endpoints from the bundled
+  official inventory.
 - Inventory-backed `execute_inventory` support for the bundled official
   endpoint inventory, including required input/header validation and TR ID
   selection rules from the captured metadata.
@@ -112,6 +115,7 @@ The typed SDK currently exposes:
 | `execute_bond_trading_account` | `/uapi/domestic-bond/v1/trading/*` | Domain-scoped inventory execution for 7 listed bond trading/account endpoints. Real trading mutations remain locally blocked. |
 | `execute_bond_quotation` | `/uapi/domestic-bond/v1/quotations/*` | Domain-scoped inventory execution for 8 listed bond quotation endpoints. |
 | `execute_bond_realtime_tryitout` | `/tryitout/*` | Domain-scoped inventory execution for 3 listed bond realtime tryitout/mock-contract endpoints. This is not a live WebSocket subscription API. |
+| `execute_overseas_futures_options` | 35 overseas futures/options inventory endpoints | Collection-specific wrapper keyed by `OverseasFuturesOptionsEndpoint`; all bundled endpoints are real-only, required fields are validated from inventory, and real trading mutations are locally blocked. |
 
 The bundled inventory covers 338 official endpoints across 22 collections.
 Endpoints outside the typed SDK surface do not yet have ergonomic typed Rust

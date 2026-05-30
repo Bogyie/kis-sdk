@@ -4,6 +4,7 @@ use axum::{
     Json, Router,
 };
 use kis_sdk::{
+    apis::overseas_futures_options::OverseasFuturesOptionsEndpoint,
     apis::{
         bond::{
             self, BOND_QUOTATION_OPERATIONS, BOND_REALTIME_TRYITOUT_OPERATIONS,
@@ -15,6 +16,7 @@ use kis_sdk::{
         domestic_stock_realtime::{self, DOMESTIC_STOCK_REALTIME_TRYITOUT_OPERATIONS},
     },
     config::Environment,
+    contract::EnvironmentSupport,
     credentials::{Account, AppCredentials, SecretString},
     endpoint::{InventoryCatalog, InventoryRequest, OperationKind},
     error::KisError,
@@ -251,6 +253,36 @@ async fn bond_domain_apis_preserve_inventory_validation_and_safety_guards() {
     ));
 }
 
+#[test]
+fn overseas_futures_options_sdk_surface_covers_inventory_slice() {
+    let catalog = InventoryCatalog::bundled().expect("inventory catalog builds");
+
+    assert_eq!(OverseasFuturesOptionsEndpoint::ALL.len(), 35);
+
+    let mut trading_account = 0;
+    let mut quotations = 0;
+    let mut realtime = 0;
+
+    for endpoint in OverseasFuturesOptionsEndpoint::ALL {
+        let spec = catalog
+            .endpoint(endpoint.operation_id())
+            .unwrap_or_else(|| panic!("{} exists in inventory", endpoint.operation_id()));
+
+        assert_eq!(spec.env_support, EnvironmentSupport::RealOnly);
+
+        match spec.collection_name.as_str() {
+            "[해외선물옵션] 주문/계좌" => trading_account += 1,
+            "[해외선물옵션] 기본시세" => quotations += 1,
+            "[해외선물옵션]실시간시세" => realtime += 1,
+            other => panic!("unexpected overseas futures/options collection {other}"),
+        }
+    }
+
+    assert_eq!(trading_account, 11);
+    assert_eq!(quotations, 20);
+    assert_eq!(realtime, 4);
+}
+
 #[tokio::test]
 async fn inventory_execute_calls_mocked_endpoint_by_operation_id() {
     let server = MockServer::start().await.expect("mock server starts");
@@ -299,6 +331,112 @@ fn assert_domain_operations(
             .unwrap_or_else(|| panic!("{operation_id} must exist in inventory catalog"));
         assert_eq!(endpoint.collection_name, collection_name);
     }
+}
+
+#[tokio::test]
+async fn overseas_futures_options_wrapper_rejects_mock_for_real_only_endpoint() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_overseas_futures_options::<serde_json::Value>(
+            OverseasFuturesOptionsEndpoint::InquirePrice,
+            InventoryRequest::new().query(json!({
+                "SRS_CD": "ESM26"
+            })),
+        )
+        .await
+        .expect_err("real-only overseas futures/options endpoint should not run in mock");
+
+    assert!(matches!(error, KisError::UnsupportedEnvironment { .. }));
+}
+
+#[tokio::test]
+async fn overseas_futures_options_read_wrapper_validates_then_reaches_transport_in_real_mode() {
+    let client = KisClient::builder(Environment::Real)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_overseas_futures_options::<serde_json::Value>(
+            OverseasFuturesOptionsEndpoint::InquirePrice,
+            InventoryRequest::new().query(json!({
+                "SRS_CD": "ESM26"
+            })),
+        )
+        .await
+        .expect_err("unreachable local URL should fail after local validation");
+
+    assert!(
+        matches!(error, KisError::Transport(_)),
+        "expected transport error after passing local read guards, got {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn overseas_futures_options_order_wrapper_keeps_real_trading_disabled() {
+    let client = KisClient::builder(Environment::Real)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_overseas_futures_options::<serde_json::Value>(
+            OverseasFuturesOptionsEndpoint::Order,
+            InventoryRequest::new().body(json!({
+                "ACNT_PRDT_CD": "01",
+                "CANO": "12345678",
+                "CCLD_CNDT_CD": "2",
+                "CPLX_ORD_DVSN_CD": "0",
+                "ECIS_RSVN_ORD_YN": "N",
+                "FM_HDGE_ORD_SCRN_YN": "N",
+                "FM_LIMIT_ORD_PRIC": "5000",
+                "FM_ORD_QTY": "1",
+                "FM_STOP_ORD_PRIC": "0",
+                "OVRS_FUTR_FX_PDNO": "ESM26",
+                "PRIC_DVSN_CD": "1",
+                "SLL_BUY_DVSN_CD": "02"
+            })),
+        )
+        .await
+        .expect_err("real order should be locally blocked before transport");
+
+    assert!(matches!(error, KisError::LiveTradingDisabled { .. }));
+}
+
+#[tokio::test]
+async fn overseas_futures_options_ambiguous_order_tr_id_requires_caller_choice() {
+    let client = KisClient::builder(Environment::Real)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_overseas_futures_options::<serde_json::Value>(
+            OverseasFuturesOptionsEndpoint::OrderRevisionCancellation,
+            InventoryRequest::new().body(json!({
+                "ACNT_PRDT_CD": "01",
+                "CANO": "12345678",
+                "FM_HDGE_ORD_SCRN_YN": "N",
+                "ORGN_ODNO": "0000000001",
+                "ORGN_ORD_DT": "20260529"
+            })),
+        )
+        .await
+        .expect_err("revision/cancel endpoint should require explicit TR ID");
+
+    assert!(matches!(error, KisError::AmbiguousTrId { .. }));
 }
 
 #[tokio::test]
