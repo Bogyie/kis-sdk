@@ -37,7 +37,7 @@ Verification date: 2026-05-29 Asia/Seoul
 | Listed bond quotations | 8 | 0 | 8 |
 | Listed bond realtime | 3 | 0 | 3 |
 
-## SDK Typed Surface
+## SDK Surface
 
 The initial typed SDK surface intentionally exposes a narrow domestic stock slice:
 
@@ -48,8 +48,6 @@ The initial typed SDK surface intentionally exposes a narrow domestic stock slic
 | `inquire_domestic_stock_balance` | GET | `/uapi/domestic-stock/v1/trading/inquire-balance` | Covered | Uses `TTTC8434R` real and `VTTC8434R` mock. |
 | `place_domestic_stock_cash_order` | POST | `/uapi/domestic-stock/v1/trading/order-cash` | Covered | Buy/sell TR IDs are selected by side and environment. Real trading is locally blocked. |
 | `execute_overseas_futures_options` | Mixed | 35 `[해외선물옵션]` order/account, quotation, and realtime endpoints | Covered | Uses `OverseasFuturesOptionsEndpoint` enum plus bundled inventory validation. The whole slice is real-only in the captured contract, mock mode rejects it locally, live trading mutations remain disabled, and ambiguous revision/cancel TR IDs require caller override. |
-
-Other official endpoints remain represented in the bundled contract and mock route inventory, but are not yet promoted to typed SDK request/response methods or domain-scoped wrappers.
 
 ## Domestic Futures/Options SDK Coverage
 
@@ -69,14 +67,33 @@ collections before network I/O. Order-changing endpoints retain local
 side/session-specific TR ID metadata requires explicit
 `InventoryRequest::tr_id_override(...)` selection.
 
+## Additional Domain-Scoped SDK Coverage
+
+Domain-scoped inventory helpers also expose stable operation-id constants and
+execution methods for these follow-on slices:
+
+| Domain helper | Covered collection | Endpoint count | Notes |
+| --- | --- | ---: | --- |
+| `execute_domestic_stock_realtime_tryitout` | Domestic stock realtime | 29 | REST-style `/tryitout/*` inventory/mock-contract execution only; not live WebSocket subscription behavior. |
+| `execute_bond_trading_account` | Listed bond trading/account | 7 | Real-only in bundled inventory; real trading mutations remain locally blocked. |
+| `execute_bond_quotation` | Listed bond quotations | 8 | Real-only in bundled inventory. |
+| `execute_bond_realtime_tryitout` | Listed bond realtime | 3 | REST-style `/tryitout/*` inventory/mock-contract execution only; not live WebSocket subscription behavior. |
+
+The remaining official endpoints are represented in the bundled contract and
+mock route inventory, but are not yet promoted to typed SDK request/response
+methods or domain-scoped wrappers.
+
 ## Mock Contract Evidence
 
 The mock server loads the bundled contract through `ContractInventory::bundled()` and builds its route index from every `(method, path)` pair.
 
-Executable coverage added in `tests/mock_server_contract.rs`:
+Executable coverage added in `tests/mock_server_contract.rs` and
+`tests/sdk_core.rs`:
 
 - Validates source metadata: official URL, checked date, 338 endpoints, 22 collections.
 - Verifies route index cardinality equals the official endpoint count.
+- Verifies domestic futures/options, domestic stock realtime, and listed bond
+  domain helper constants cover their 91 targeted inventory endpoints exactly.
 - Starts the mock server and requests every bundled endpoint.
 - Confirms 3 auth endpoints return success.
 - Confirms 43 non-auth `real+mock` endpoints return KIS success envelopes when required headers/TR IDs are supplied.
