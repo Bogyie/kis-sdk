@@ -49,6 +49,26 @@ The initial typed SDK surface intentionally exposes a narrow domestic stock slic
 | `place_domestic_stock_cash_order` | POST | `/uapi/domestic-stock/v1/trading/order-cash` | Covered | Buy/sell TR IDs are selected by side and environment. Real trading is locally blocked by `KisError::LiveTradingDisabled` before network I/O. |
 | `execute_overseas_futures_options` | Mixed | 35 `[해외선물옵션]` order/account, quotation, and realtime endpoints | Covered | Uses `OverseasFuturesOptionsEndpoint` enum plus bundled inventory validation. The whole slice is real-only in the captured contract, mock mode rejects it locally, live trading mutations remain disabled, and ambiguous revision/cancel TR IDs require caller override. |
 
+## Domestic Futures/Options SDK Coverage
+
+The domestic futures/options child surface exposes scoped inventory-backed SDK
+methods for all 44 endpoints in the requested official collections:
+
+| Collection | Endpoint count | Mock support in inventory | SDK coverage |
+| --- | ---: | ---: | --- |
+| Domestic futures/options trading/account | 15 | 5 real+mock, 10 real-only | Covered by `execute_domestic_futures_options_trading_account` and `TRADING_ACCOUNT_OPERATION_IDS`. |
+| Domestic futures/options quotations | 9 | 3 real+mock, 6 real-only | Covered by `execute_domestic_futures_options_quotation` and `QUOTATION_OPERATION_IDS`. |
+| Domestic futures/options realtime | 20 | 1 real+mock, 19 real-only | Covered by `execute_domestic_futures_options_realtime_quotation` and `REALTIME_QUOTATION_OPERATION_IDS`. |
+
+The combined `execute_domestic_futures_options` method accepts the same 44
+operation ids and rejects operation ids outside the domestic futures/options
+collections before network I/O. Order-changing endpoints retain local
+`KisError::LiveTradingDisabled` protection in `Environment::Real`, and
+side/session-specific TR ID metadata requires explicit
+`InventoryRequest::tr_id_override(...)` selection.
+
+## Additional Domain-Scoped SDK Coverage
+
 Domain-scoped inventory helpers also expose stable operation-id constants and
 execution methods for these follow-on slices:
 
@@ -61,7 +81,7 @@ execution methods for these follow-on slices:
 
 The remaining official endpoints are represented in the bundled contract and
 mock route inventory, but are not yet promoted to typed SDK request/response
-methods.
+methods or domain-scoped wrappers.
 
 ## Domestic Stock REST Inventory API
 
@@ -89,8 +109,8 @@ Executable coverage added in `tests/mock_server_contract.rs` and
 
 - Validates source metadata: official URL, checked date, 338 endpoints, 22 collections.
 - Verifies route index cardinality equals the official endpoint count.
-- Verifies domestic stock realtime and listed bond domain helper constants cover
-  their 47 targeted inventory endpoints exactly.
+- Verifies domestic futures/options, domestic stock realtime, and listed bond
+  domain helper constants cover their 91 targeted inventory endpoints exactly.
 - Starts the mock server and requests every bundled endpoint.
 - Confirms 3 auth endpoints return success.
 - Confirms 43 non-auth `real+mock` endpoints return KIS success envelopes when required headers/TR IDs are supplied.
@@ -103,6 +123,8 @@ Executable coverage added in `tests/mock_server_contract.rs` and
 - Real-to-mock fallback is opt-in and read-only. POST trading fallback is rejected by policy.
 - Fallback requires separate fallback credentials and fallback bearer token, preventing primary real credentials from crossing into the mock fallback target.
 - Real cash orders are blocked locally by `KisError::LiveTradingDisabled` before network I/O.
+- Domestic futures/options order mutations are blocked locally by `KisError::LiveTradingDisabled` before network I/O.
+- Domestic futures/options side/session-specific order TR ID metadata requires the caller to choose the concrete TR ID.
 - Overseas futures/options order mutations are blocked locally by `KisError::LiveTradingDisabled` before network I/O.
 - Overseas futures/options revision/cancel keeps the captured ambiguous TR ID boundary and requires the caller to choose the concrete TR ID.
 - Account/order request validation rejects malformed account, product, quantity, and price fields before network I/O.

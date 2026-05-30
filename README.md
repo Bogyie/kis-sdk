@@ -29,6 +29,8 @@ more ergonomic typed wrappers.
   workflows.
 - Typed domestic stock methods for quotation price, balance inquiry, and cash
   order calls.
+- Domain-scoped domestic futures/options inventory methods for 44
+  order/account, quotation, and realtime quotation endpoints.
 - Domain-scoped inventory helpers for 29 domestic stock realtime tryitout
   endpoints and 18 listed bond endpoints.
 - Collection-specific overseas futures/options inventory wrapper covering all
@@ -123,10 +125,25 @@ The typed SDK currently exposes:
 | `execute_bond_realtime_tryitout` | `/tryitout/*` | Domain-scoped inventory execution for 3 listed bond realtime tryitout/mock-contract endpoints. This is not a live WebSocket subscription API. |
 | `execute_overseas_futures_options` | 35 overseas futures/options inventory endpoints | Collection-specific wrapper keyed by `OverseasFuturesOptionsEndpoint`; all bundled endpoints are real-only, required fields are validated from inventory, and real trading mutations are locally blocked. |
 
+The domestic futures/options SDK surface exposes inventory-backed domain
+methods for all 44 endpoints in these bundled official collections:
+
+| Collection | Endpoint count | SDK entry point |
+| --- | ---: | --- |
+| Domestic futures/options trading/account | 15 | `execute_domestic_futures_options_trading_account` |
+| Domestic futures/options quotations | 9 | `execute_domestic_futures_options_quotation` |
+| Domestic futures/options realtime quotations | 20 | `execute_domestic_futures_options_realtime_quotation` |
+
+The same endpoints are also available through the combined
+`execute_domestic_futures_options` method. Operation ids are exposed through
+`kis_sdk::apis::domestic_futures_options::{TRADING_ACCOUNT_OPERATION_IDS,
+QUOTATION_OPERATION_IDS, REALTIME_QUOTATION_OPERATION_IDS}`.
+
 The bundled inventory covers 338 official endpoints across 22 collections.
-Endpoints outside the typed SDK surface do not yet have ergonomic typed Rust
-request methods, but they can be addressed and called through the lower-level
-inventory execution API with stable operation ids:
+Endpoints outside the typed domestic stock methods and domain-scoped inventory
+surfaces do not yet have ergonomic typed Rust request methods, but they can be
+addressed and called through the lower-level inventory execution API with
+stable operation ids:
 
 ```rust
 use kis_sdk::endpoint::InventoryRequest;
