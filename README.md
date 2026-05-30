@@ -26,7 +26,8 @@ current coverage boundary.
 
 - `KisClient` builder with explicit real/mock environment selection and shared
   `reqwest` client reuse.
-- Redacted `AppCredentials`, `Account`, and `SecretString` helpers.
+- Redacted `AppCredentials`, `Account`, `AccountProductCode`, and
+  `SecretString` helpers.
 - OAuth token issuance, token revoke, and WebSocket approval-key issuance, with
   in-memory token reuse and static bearer token injection for tests and mock
   workflows.
@@ -36,9 +37,11 @@ current coverage boundary.
   trading/account, quotation, market-analysis, and realtime-quotation
   collections.
 - Domain-scoped domestic futures/options inventory methods for 44
-  order/account, quotation, and realtime quotation endpoints.
+  order/account, quotation, and realtime quotation endpoints, with typed
+  operation-id newtypes for safer call sites.
 - Domain-scoped inventory helpers for 29 domestic stock realtime tryitout
-  endpoints and 18 listed bond endpoints.
+  endpoints and 18 listed bond endpoints, with typed operation-id newtypes
+  available alongside the legacy string constants.
 - Collection-specific overseas futures/options inventory wrapper covering all
   35 order/account, quotation, and realtime endpoints from the bundled
   official inventory.
@@ -137,6 +140,15 @@ The typed SDK currently exposes:
 | `execute_bond_quotation` | `/uapi/domestic-bond/v1/quotations/*` | Domain-scoped inventory execution for 8 listed bond quotation endpoints. |
 | `execute_bond_realtime_tryitout` | `/tryitout/*` | Domain-scoped inventory execution for 3 listed bond realtime tryitout/mock-contract endpoints. This is not a live WebSocket subscription API. |
 | `execute_overseas_futures_options` | 35 overseas futures/options inventory endpoints | Collection-specific wrapper keyed by `OverseasFuturesOptionsEndpoint`; all bundled endpoints are real-only, required fields are validated from inventory, and real trading mutations are locally blocked. |
+
+For new call sites, prefer the typed variants where they exist:
+`Account::domestic_stock`, `InquirePriceRequest::with_market`,
+`CashOrderRequest::with_order_division`,
+`execute_domestic_stock_realtime_tryitout_operation`,
+`execute_bond_*_operation`, and
+`execute_domestic_futures_options_operation`. The older `String` fields,
+string constants, and `&str` operation-id methods remain available for
+compatibility.
 
 The domestic futures/options SDK surface exposes inventory-backed domain
 methods for all 44 endpoints in these bundled official collections:

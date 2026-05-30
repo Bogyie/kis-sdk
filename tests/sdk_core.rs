@@ -6,19 +6,23 @@ use axum::{
 use kis_sdk::{
     apis::{
         bond::{
-            self, BOND_QUOTATION_OPERATIONS, BOND_REALTIME_TRYITOUT_OPERATIONS,
+            self, BondQuotationOperation, BondRealtimeOperation, BondTradingAccountOperation,
+            BOND_QUOTATION_OPERATIONS, BOND_REALTIME_TRYITOUT_OPERATIONS,
             BOND_TRADING_ACCOUNT_OPERATIONS,
         },
         domestic_futures_options::{
-            operation_ids as domestic_futures_options_operation_ids, QUOTATION_OPERATION_IDS,
+            operation_ids as domestic_futures_options_operation_ids,
+            DomesticFuturesOptionsOperation, QUOTATION_OPERATION_IDS,
             REALTIME_QUOTATION_OPERATION_IDS, TRADING_ACCOUNT_OPERATION_IDS,
         },
         domestic_stock::{
-            domestic_stock_rest_endpoints, CashOrderRequest, CashOrderSide, InquireBalanceRequest,
-            InquirePriceRequest, DOMESTIC_STOCK_REST_COLLECTIONS,
-            DOMESTIC_STOCK_REST_ENDPOINT_COUNT,
+            domestic_stock_rest_endpoints, CashOrderDivision, CashOrderRequest, CashOrderSide,
+            DomesticStockMarketDivision, InquireBalanceRequest, InquirePriceRequest,
+            DOMESTIC_STOCK_REST_COLLECTIONS, DOMESTIC_STOCK_REST_ENDPOINT_COUNT,
         },
-        domestic_stock_realtime::{self, DOMESTIC_STOCK_REALTIME_TRYITOUT_OPERATIONS},
+        domestic_stock_realtime::{
+            self, DomesticStockRealtimeOperation, DOMESTIC_STOCK_REALTIME_TRYITOUT_OPERATIONS,
+        },
         overseas_futures_options::OverseasFuturesOptionsEndpoint,
         overseas_stock::{
             OverseasStockEndpoint, MARKET_ANALYSIS_ENDPOINTS, QUOTATION_ENDPOINTS,
@@ -27,7 +31,7 @@ use kis_sdk::{
     },
     config::Environment,
     contract::EnvironmentSupport,
-    credentials::{Account, AppCredentials, SecretString},
+    credentials::{Account, AccountProductCode, AppCredentials, SecretString},
     endpoint::{InventoryCatalog, InventoryEndpointSpec, InventoryRequest, OperationKind},
     error::KisError,
     fallback::FallbackPolicy,
@@ -37,6 +41,7 @@ use kis_sdk::{
 };
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, HashSet};
+use std::str::FromStr;
 use tokio::{net::TcpListener, task::JoinHandle};
 
 #[tokio::test]
@@ -294,6 +299,104 @@ fn domestic_realtime_and_bond_domain_operations_cover_target_inventory_collectio
     );
 }
 
+#[test]
+fn typed_domestic_stock_values_serialize_and_parse_contract_codes() {
+    let account = Account::domestic_stock("12345678");
+
+    let price = InquirePriceRequest::with_market(DomesticStockMarketDivision::Stock, "005930");
+    assert_eq!(
+        serde_json::to_value(&price).expect("price request serializes"),
+        json!({
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": "005930"
+        })
+    );
+
+    let order = CashOrderRequest::with_order_division(
+        &account,
+        "005930",
+        CashOrderDivision::Limit,
+        1,
+        70000,
+    );
+    assert_eq!(
+        serde_json::to_value(&order).expect("cash order serializes"),
+        json!({
+            "CANO": "12345678",
+            "ACNT_PRDT_CD": "01",
+            "PDNO": "005930",
+            "ORD_DVSN": "00",
+            "ORD_QTY": "1",
+            "ORD_UNPR": "70000"
+        })
+    );
+
+    assert_eq!(
+        AccountProductCode::from_str("01").expect("account product parses"),
+        AccountProductCode::DomesticStock
+    );
+    assert_eq!(
+        serde_json::to_value(AccountProductCode::DomesticStock)
+            .expect("account product serializes"),
+        json!("01")
+    );
+    assert_eq!(
+        DomesticStockMarketDivision::from_str("J").expect("market division parses"),
+        DomesticStockMarketDivision::Stock
+    );
+    assert_eq!(
+        serde_json::to_value(DomesticStockMarketDivision::Stock)
+            .expect("market division serializes"),
+        json!("J")
+    );
+    assert_eq!(
+        CashOrderDivision::from_str("00").expect("cash order division parses"),
+        CashOrderDivision::Limit
+    );
+    assert_eq!(
+        serde_json::to_value(CashOrderDivision::Limit).expect("order division serializes"),
+        json!("00")
+    );
+    assert!(AccountProductCode::from_str("99").is_err());
+    assert!(DomesticStockMarketDivision::from_str("K").is_err());
+    assert!(CashOrderDivision::from_str("10").is_err());
+}
+
+#[test]
+fn typed_operation_newtypes_parse_and_reject_unknown_operation_ids() {
+    let bond_quotation = BondQuotationOperation::from_str(bond::INQUIRE_PRICE)
+        .expect("bond quotation operation parses");
+    assert_eq!(bond_quotation.operation_id(), bond::INQUIRE_PRICE);
+    assert_eq!(
+        BondTradingAccountOperation::BUY_ORDER.operation_id(),
+        bond::BUY_ORDER
+    );
+    assert_eq!(
+        BondRealtimeOperation::REALTIME_TRADE.operation_id(),
+        bond::REALTIME_TRADE
+    );
+
+    let realtime =
+        DomesticStockRealtimeOperation::from_str(domestic_stock_realtime::REALTIME_TRADE_KRX)
+            .expect("domestic realtime operation parses");
+    assert_eq!(
+        realtime.operation_id(),
+        domestic_stock_realtime::REALTIME_TRADE_KRX
+    );
+
+    let domestic_future =
+        DomesticFuturesOptionsOperation::from_str(TRADING_ACCOUNT_OPERATION_IDS[0])
+            .expect("domestic futures/options operation parses");
+    assert_eq!(
+        domestic_future.operation_id(),
+        TRADING_ACCOUNT_OPERATION_IDS[0]
+    );
+
+    assert!(BondQuotationOperation::from_str(bond::BUY_ORDER).is_err());
+    assert!(DomesticStockRealtimeOperation::from_str(bond::REALTIME_TRADE).is_err());
+    assert!(DomesticFuturesOptionsOperation::from_str("unknown.operation").is_err());
+}
+
 #[tokio::test]
 async fn overseas_stock_execute_calls_mock_supported_price_endpoint() {
     let server = MockServer::start().await.expect("mock server starts");
@@ -333,8 +436,8 @@ async fn domestic_stock_realtime_tryitout_api_calls_mock_contract_endpoint() {
         .expect("client builds");
 
     let response = client
-        .execute_domestic_stock_realtime_tryitout::<serde_json::Value>(
-            domestic_stock_realtime::REALTIME_TRADE_KRX,
+        .execute_domestic_stock_realtime_tryitout_operation::<serde_json::Value>(
+            DomesticStockRealtimeOperation::REALTIME_TRADE_KRX,
             InventoryRequest::new()
                 .header("approval_key", "test_approval_key")
                 .header("tr_type", "1")
@@ -464,8 +567,8 @@ async fn bond_domain_apis_preserve_inventory_validation_and_safety_guards() {
         .expect("client builds");
 
     let missing_query_error = read_client
-        .execute_bond_quotation::<serde_json::Value>(
-            bond::INQUIRE_PRICE,
+        .execute_bond_quotation_operation::<serde_json::Value>(
+            BondQuotationOperation::INQUIRE_PRICE,
             InventoryRequest::new().query(json!({
                 "FID_COND_MRKT_DIV_CODE": "B"
             })),
@@ -482,8 +585,8 @@ async fn bond_domain_apis_preserve_inventory_validation_and_safety_guards() {
         .expect("client builds");
 
     let unsupported_mock_error = mock_client
-        .execute_bond_realtime_tryitout::<serde_json::Value>(
-            bond::REALTIME_TRADE,
+        .execute_bond_realtime_tryitout_operation::<serde_json::Value>(
+            BondRealtimeOperation::REALTIME_TRADE,
             InventoryRequest::new()
                 .header("approval_key", "test_approval_key")
                 .header("tr_type", "1")
@@ -500,8 +603,8 @@ async fn bond_domain_apis_preserve_inventory_validation_and_safety_guards() {
     ));
 
     let live_trading_error = read_client
-        .execute_bond_trading_account::<serde_json::Value>(
-            bond::BUY_ORDER,
+        .execute_bond_trading_account_operation::<serde_json::Value>(
+            BondTradingAccountOperation::BUY_ORDER,
             InventoryRequest::new().body(json!({
                 "ACNT_PRDT_CD": "01",
                 "BOND_ORD_UNPR": "10000",

@@ -1,4 +1,5 @@
 use serde::de::DeserializeOwned;
+use std::{fmt, str::FromStr};
 
 use crate::{
     client::{KisClient, KisEnvelope},
@@ -66,7 +67,59 @@ pub fn operation_ids() -> impl Iterator<Item = &'static str> {
         .chain(REALTIME_QUOTATION_OPERATION_IDS)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct DomesticFuturesOptionsOperation(&'static str);
+
+impl DomesticFuturesOptionsOperation {
+    pub fn from_static(operation_id: &'static str) -> Result<Self, KisError> {
+        if operation_ids().any(|candidate| candidate == operation_id) {
+            Ok(Self(operation_id))
+        } else {
+            Err(KisError::Validation(format!(
+                "operation id {operation_id} is not a domestic futures/options endpoint"
+            )))
+        }
+    }
+
+    pub fn operation_id(self) -> &'static str {
+        self.0
+    }
+}
+
+impl fmt::Display for DomesticFuturesOptionsOperation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.operation_id())
+    }
+}
+
+impl FromStr for DomesticFuturesOptionsOperation {
+    type Err = KisError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        operation_ids()
+            .find(|candidate| *candidate == value)
+            .map(Self)
+            .ok_or_else(|| {
+                KisError::Validation(format!(
+                    "operation id {value} is not a domestic futures/options endpoint"
+                ))
+            })
+    }
+}
+
 impl KisClient {
+    pub async fn execute_domestic_futures_options_operation<T>(
+        &self,
+        operation: DomesticFuturesOptionsOperation,
+        request: InventoryRequest,
+    ) -> Result<KisEnvelope<T>, KisError>
+    where
+        T: DeserializeOwned,
+    {
+        self.execute_domestic_futures_options(operation.operation_id(), request)
+            .await
+    }
+
     pub async fn execute_domestic_futures_options<T>(
         &self,
         operation_id: &str,

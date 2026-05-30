@@ -2,6 +2,7 @@ use http::Method;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::{fmt, str::FromStr};
 
 use crate::{
     client::{KisClient, KisEnvelope},
@@ -51,6 +52,88 @@ const ORDER_CASH: EndpointSpec = EndpointSpec {
     operation_kind: OperationKind::TradingMutation,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum DomesticStockMarketDivision {
+    Stock,
+}
+
+impl DomesticStockMarketDivision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stock => "J",
+        }
+    }
+}
+
+impl fmt::Display for DomesticStockMarketDivision {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for DomesticStockMarketDivision {
+    type Err = KisError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "J" => Ok(Self::Stock),
+            other => Err(KisError::Validation(format!(
+                "{other} is not a supported domestic stock market division"
+            ))),
+        }
+    }
+}
+
+impl Serialize for DomesticStockMarketDivision {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum CashOrderDivision {
+    Limit,
+}
+
+impl CashOrderDivision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Limit => "00",
+        }
+    }
+}
+
+impl fmt::Display for CashOrderDivision {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for CashOrderDivision {
+    type Err = KisError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "00" => Ok(Self::Limit),
+            other => Err(KisError::Validation(format!(
+                "{other} is not a supported domestic cash order division"
+            ))),
+        }
+    }
+}
+
+impl Serialize for CashOrderDivision {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct InquirePriceRequest {
     #[serde(rename = "FID_COND_MRKT_DIV_CODE")]
@@ -61,8 +144,12 @@ pub struct InquirePriceRequest {
 
 impl InquirePriceRequest {
     pub fn new(stock_code: impl Into<String>) -> Self {
+        Self::with_market(DomesticStockMarketDivision::Stock, stock_code)
+    }
+
+    pub fn with_market(market: DomesticStockMarketDivision, stock_code: impl Into<String>) -> Self {
         Self {
-            market_division_code: "J".to_string(),
+            market_division_code: market.as_str().to_string(),
             stock_code: stock_code.into(),
         }
     }
@@ -162,7 +249,24 @@ impl CashOrderRequest {
             cano: account.cano().to_string(),
             account_product_code: account.product_code().to_string(),
             product_number: stock_code.into(),
-            order_division: "00".to_string(),
+            order_division: CashOrderDivision::Limit.as_str().to_string(),
+            order_quantity: quantity.to_string(),
+            order_unit_price: price.to_string(),
+        }
+    }
+
+    pub fn with_order_division(
+        account: &Account,
+        stock_code: impl Into<String>,
+        order_division: CashOrderDivision,
+        quantity: u64,
+        price: u64,
+    ) -> Self {
+        Self {
+            cano: account.cano().to_string(),
+            account_product_code: account.product_code().to_string(),
+            product_number: stock_code.into(),
+            order_division: order_division.as_str().to_string(),
             order_quantity: quantity.to_string(),
             order_unit_price: price.to_string(),
         }

@@ -13,5 +13,5 @@ pub use client::{
     AccessTokenResponse, KisClient, KisEnvelope, RealtimeApprovalKeyResponse, RevokeTokenResponse,
 };
 pub use config::Environment;
-pub use credentials::{Account, AppCredentials, SecretString};
+pub use credentials::{Account, AccountProductCode, AppCredentials, SecretString};
 pub use error::KisError;
