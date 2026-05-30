@@ -7,10 +7,11 @@ their own secret-management path.
 
 The typed SDK surface currently covers OAuth token issuance and revoke,
 WebSocket approval-key issuance, domestic stock price inquiry, domestic stock
-balance inquiry, and domestic stock cash-order requests. Domain-scoped
-inventory helpers cover domestic futures/options, 29 domestic stock realtime
-tryitout endpoints, and 18 listed bond endpoints. The shared inventory-backed
-execution API can also call every endpoint captured in
+balance inquiry, and domestic stock cash-order requests. It also exposes
+inventory-backed overseas stock endpoint handles for 51 official endpoints.
+Domain-scoped inventory helpers cover domestic futures/options, 29 domestic
+stock realtime tryitout endpoints, and 18 listed bond endpoints. The shared
+inventory-backed execution API can also call every endpoint captured in
 `contracts/kis_official_endpoint_inventory.compact.json` by stable operation id
 while follow-on work adds more ergonomic typed wrappers.
 
@@ -201,6 +202,43 @@ filled by the client. Endpoints with ambiguous TR IDs require
 `InventoryRequest::tr_id_override(...)`. Real-only endpoints are rejected in
 `Environment::Mock`, and real trading mutations remain blocked locally by
 `KisError::LiveTradingDisabled`.
+
+## Call An Overseas Stock Endpoint
+
+The overseas stock module pins all inventory-backed endpoints from the official
+overseas stock collections: 18 trading/account endpoints, 14 quotation
+endpoints, 15 market-analysis endpoints, and 4 realtime-quotation endpoints.
+Use the enum when you want a stable SDK handle instead of a raw operation-id
+string:
+
+```rust
+use kis_sdk::{
+    apis::overseas_stock::OverseasStockEndpoint,
+    endpoint::InventoryRequest,
+};
+use serde_json::json;
+
+async fn overseas_price(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_overseas_stock::<serde_json::Value>(
+            OverseasStockEndpoint::GetOverseasPriceQuotationsPrice,
+            InventoryRequest::new().query(json!({
+                "AUTH": "",
+                "EXCD": "NAS",
+                "SYMB": "AAPL"
+            })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
+
+Order endpoints keep the same safety boundary as domestic orders: live
+environment trading mutations return `KisError::LiveTradingDisabled` before
+network I/O. Overseas order TR IDs vary by country, exchange, and order side, so
+ambiguous inventory values require caller-supplied `tr_id_override(...)`.
 
 ## Call A Domestic Futures/Options Endpoint
 

@@ -29,6 +29,9 @@ more ergonomic typed wrappers.
   workflows.
 - Typed domestic stock methods for quotation price, balance inquiry, and cash
   order calls.
+- Inventory-backed overseas stock API surface for 51 endpoints across
+  trading/account, quotation, market-analysis, and realtime-quotation
+  collections.
 - Domain-scoped domestic futures/options inventory methods for 44
   order/account, quotation, and realtime quotation endpoints.
 - Domain-scoped inventory helpers for 29 domestic stock realtime tryitout
@@ -183,6 +186,35 @@ methods: required query/body/non-standard header fields are validated before
 network I/O, standard KIS headers are filled by the client, ambiguous TR IDs
 require an explicit override, real-only endpoints are rejected in mock mode, and
 real trading mutations are locally blocked.
+
+The overseas stock SDK surface pins inventory-backed endpoint handles for these
+collections:
+
+| Collection | Endpoint count | Access |
+| --- | ---: | --- |
+| `[해외주식] 주문/계좌` | 18 | `OverseasStockCollection::TradingAccount` / `TRADING_ACCOUNT_ENDPOINTS` |
+| `[해외주식] 기본시세` | 14 | `OverseasStockCollection::Quotation` / `QUOTATION_ENDPOINTS` |
+| `[해외주식] 시세분석` | 15 | `OverseasStockCollection::MarketAnalysis` / `MARKET_ANALYSIS_ENDPOINTS` |
+| `[해외주식] 실시간시세` | 4 | `OverseasStockCollection::RealtimeQuotation` / `REALTIME_QUOTATION_ENDPOINTS` |
+
+```rust
+use kis_sdk::{
+    apis::overseas_stock::OverseasStockEndpoint,
+    endpoint::InventoryRequest,
+};
+use serde_json::json;
+
+let response = client
+    .execute_overseas_stock::<serde_json::Value>(
+        OverseasStockEndpoint::GetOverseasPriceQuotationsPrice,
+        InventoryRequest::new().query(json!({
+            "AUTH": "",
+            "EXCD": "NAS",
+            "SYMB": "AAPL"
+        })),
+    )
+    .await?;
+```
 
 The realtime helpers intentionally execute the REST-style inventory tryitout
 shape used by the bundled mock contract. Future live WebSocket subscription

@@ -20,6 +20,10 @@ use kis_sdk::{
         },
         domestic_stock_realtime::{self, DOMESTIC_STOCK_REALTIME_TRYITOUT_OPERATIONS},
         overseas_futures_options::OverseasFuturesOptionsEndpoint,
+        overseas_stock::{
+            OverseasStockEndpoint, MARKET_ANALYSIS_ENDPOINTS, QUOTATION_ENDPOINTS,
+            REALTIME_QUOTATION_ENDPOINTS, TRADING_ACCOUNT_ENDPOINTS,
+        },
     },
     config::Environment,
     contract::EnvironmentSupport,
@@ -32,7 +36,7 @@ use kis_sdk::{
     AccessTokenResponse, KisClient, RealtimeApprovalKeyResponse,
 };
 use serde_json::{json, Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use tokio::{net::TcpListener, task::JoinHandle};
 
 #[tokio::test]
@@ -112,6 +116,52 @@ fn inventory_operation_kind_uses_contract_kind_not_http_method_only() {
 }
 
 #[test]
+fn overseas_stock_sdk_surface_covers_all_inventory_endpoints() {
+    let catalog = InventoryCatalog::bundled().expect("inventory catalog builds");
+    let covered = OverseasStockEndpoint::all()
+        .iter()
+        .map(|endpoint| endpoint.operation_id())
+        .collect::<HashSet<_>>();
+    let inventory = catalog
+        .endpoints()
+        .iter()
+        .filter(|endpoint| {
+            matches!(
+                endpoint.collection_name.as_str(),
+                "[해외주식] 주문/계좌"
+                    | "[해외주식] 기본시세"
+                    | "[해외주식] 시세분석"
+                    | "[해외주식] 실시간시세"
+            )
+        })
+        .map(|endpoint| endpoint.operation_id.as_str())
+        .collect::<HashSet<_>>();
+
+    assert_eq!(TRADING_ACCOUNT_ENDPOINTS.len(), 18);
+    assert_eq!(QUOTATION_ENDPOINTS.len(), 14);
+    assert_eq!(MARKET_ANALYSIS_ENDPOINTS.len(), 15);
+    assert_eq!(REALTIME_QUOTATION_ENDPOINTS.len(), 4);
+    assert_eq!(OverseasStockEndpoint::all().len(), 51);
+    assert_eq!(covered, inventory);
+
+    for endpoint in OverseasStockEndpoint::all() {
+        let collection = endpoint.collection();
+        assert!(
+            endpoint
+                .operation_id()
+                .starts_with(collection.inventory_slug()),
+            "{} must stay in its inventory-backed collection",
+            endpoint.operation_id()
+        );
+        assert!(
+            collection.endpoints().contains(endpoint),
+            "{} must be listed in its collection slice",
+            endpoint.operation_id()
+        );
+    }
+}
+
+#[test]
 fn domestic_realtime_and_bond_domain_operations_cover_target_inventory_collections() {
     let catalog = InventoryCatalog::bundled().expect("inventory catalog builds");
 
@@ -139,6 +189,34 @@ fn domestic_realtime_and_bond_domain_operations_cover_target_inventory_collectio
         &BOND_REALTIME_TRYITOUT_OPERATIONS,
         3,
     );
+}
+
+#[tokio::test]
+async fn overseas_stock_execute_calls_mock_supported_price_endpoint() {
+    let server = MockServer::start().await.expect("mock server starts");
+    let client = KisClient::builder(Environment::Mock)
+        .base_url(server.base_url())
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let response = client
+        .execute_overseas_stock::<serde_json::Value>(
+            OverseasStockEndpoint::GetOverseasPriceQuotationsPrice,
+            InventoryRequest::new().query(json!({
+                "AUTH": "",
+                "EXCD": "NAS",
+                "SYMB": "AAPL"
+            })),
+        )
+        .await
+        .expect("overseas price succeeds through mock");
+
+    assert!(response.is_success());
+    assert!(response.output.is_some());
+
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -171,6 +249,29 @@ async fn domestic_stock_realtime_tryitout_api_calls_mock_contract_endpoint() {
 }
 
 #[tokio::test]
+async fn overseas_stock_execute_rejects_missing_required_query_before_network() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_overseas_stock::<serde_json::Value>(
+            OverseasStockEndpoint::GetOverseasPriceQuotationsPrice,
+            InventoryRequest::new().query(json!({
+                "AUTH": "",
+                "EXCD": "NAS"
+            })),
+        )
+        .await
+        .expect_err("missing SYMB should fail locally");
+
+    assert!(matches!(error, KisError::Validation(_)));
+}
+
+#[tokio::test]
 async fn domain_wrappers_reject_operations_from_other_collections_before_network() {
     let client = KisClient::builder(Environment::Mock)
         .base_url("http://127.0.0.1:9")
@@ -188,6 +289,66 @@ async fn domain_wrappers_reject_operations_from_other_collections_before_network
         .expect_err("wrong collection should fail locally");
 
     assert!(matches!(error, KisError::Validation(_)));
+}
+
+#[tokio::test]
+async fn overseas_stock_order_requires_tr_id_choice_for_ambiguous_inventory_ids() {
+    let client = KisClient::builder(Environment::Mock)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_overseas_stock::<serde_json::Value>(
+            OverseasStockEndpoint::PostOverseasStockTradingOrder,
+            InventoryRequest::new().body(json!({
+                "CANO": "12345678",
+                "ACNT_PRDT_CD": "01",
+                "OVRS_EXCG_CD": "NASD",
+                "PDNO": "AAPL",
+                "ORD_SVR_DVSN_CD": "0",
+                "ORD_DVSN": "00",
+                "ORD_QTY": "1",
+                "OVRS_ORD_UNPR": "100.00"
+            })),
+        )
+        .await
+        .expect_err("ambiguous overseas order TR ID should require override");
+
+    assert!(matches!(error, KisError::AmbiguousTrId { .. }));
+}
+
+#[tokio::test]
+async fn overseas_stock_real_order_is_blocked_even_with_explicit_tr_id() {
+    let client = KisClient::builder(Environment::Real)
+        .base_url("http://127.0.0.1:9")
+        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
+        .static_bearer_token("test_access_token")
+        .build()
+        .expect("client builds");
+
+    let error = client
+        .execute_overseas_stock::<serde_json::Value>(
+            OverseasStockEndpoint::PostOverseasStockTradingOrder,
+            InventoryRequest::new()
+                .tr_id_override("TTTT1002U")
+                .body(json!({
+                    "CANO": "12345678",
+                    "ACNT_PRDT_CD": "01",
+                    "OVRS_EXCG_CD": "NASD",
+                    "PDNO": "AAPL",
+                    "ORD_SVR_DVSN_CD": "0",
+                    "ORD_DVSN": "00",
+                    "ORD_QTY": "1",
+                    "OVRS_ORD_UNPR": "100.00"
+                })),
+        )
+        .await
+        .expect_err("real overseas order should be locally blocked before network");
+
+    assert!(matches!(error, KisError::LiveTradingDisabled { .. }));
 }
 
 #[tokio::test]
