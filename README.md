@@ -2,12 +2,11 @@
 
 Rust SDK core for Korea Investment & Securities Open API.
 
-`kis-sdk` is an early Rust client and local mock contract harness for KIS Open
-API integrations. The narrow typed SDK surface focuses on OAuth token issuance
-and a small domestic stock slice, while inventory-backed SDK APIs account for
-all 338 endpoints in the bundled official inventory by stable operation id.
-Follow-on work can add more ergonomic typed wrappers without changing the
-current coverage boundary.
+`kis-sdk` is an early Rust client for KIS Open API integrations. The narrow
+typed SDK surface focuses on OAuth token issuance and a small domestic stock
+slice, while inventory-backed SDK APIs account for all 338 endpoints in the
+bundled official inventory by stable operation id. Follow-on work can add more
+ergonomic typed wrappers without changing the current coverage boundary.
 
 ## Current Status
 
@@ -24,12 +23,11 @@ current coverage boundary.
 
 ## Features
 
-- `KisClient` builder with explicit real/mock environment selection and shared
-  `reqwest` client reuse.
+- `KisClient` builder with explicit environment selection and shared `reqwest`
+  client reuse.
 - Redacted `AppCredentials`, `Account`, and `SecretString` helpers.
 - OAuth token issuance, token revoke, and WebSocket approval-key issuance, with
-  in-memory token reuse and static bearer token injection for tests and mock
-  workflows.
+  in-memory token reuse and static bearer token injection for tests.
 - Typed domestic stock methods for quotation price, balance inquiry, and cash
   order calls.
 - Inventory-backed overseas stock API surface for 51 endpoints across
@@ -48,14 +46,9 @@ current coverage boundary.
 - Domestic stock REST `execute_domestic_stock_rest` support for the 158 listed
   endpoints across the domestic stock trading/account, quotation, ELW,
   sector/misc, product info, market analysis, and ranking analysis collections.
-- Local mock server generated from the bundled official endpoint inventory.
 - Explicit `RetryPolicy` and `FallbackPolicy` options. Retry is disabled by
   default. `RetryPolicy::conservative_reads()` retries retryable GET/read
   failures only and does not retry trading POST mutations.
-- Real-to-mock fallback is opt-in, read-only, and recorded in response execution
-  metadata. Fallback requests require separate fallback credentials and a
-  fallback bearer token, so primary real credentials are not reused across the
-  fallback trust boundary.
 
 ## Installation
 
@@ -63,7 +56,7 @@ If the crate is not available on crates.io yet, use the repository directly:
 
 ```toml
 [dependencies]
-kis-sdk = { git = "https://github.com/bogyie/kis-sdk", branch = "bog-220-kis-sdk" }
+kis-sdk = { git = "https://github.com/bogyie/kis-sdk", branch = "main" }
 ```
 
 After the first authorized crates.io publish completes, consumers should be able
@@ -71,21 +64,10 @@ to switch to a versioned dependency:
 
 ```toml
 [dependencies]
-kis-sdk = "0.1"
+kis-sdk = "0.2"
 ```
 
-## Quick Start With The Mock Server
-
-Start the local mock server:
-
-```sh
-cargo run --bin kis-mock-server -- 127.0.0.1:0
-```
-
-The server prints the bound URL, for example
-`kis mock server listening on http://127.0.0.1:49152`.
-
-Use that URL with static local-only credentials and a dummy bearer token:
+## Quick Start
 
 ```rust
 use kis_sdk::{
@@ -97,10 +79,11 @@ use kis_sdk::{
 
 #[tokio::main]
 async fn main() -> Result<(), kis_sdk::KisError> {
-    let client = KisClient::builder(Environment::Mock)
-        .base_url("http://127.0.0.1:49152")
-        .app_credentials(AppCredentials::new("test_app_key", "test_app_secret"))
-        .static_bearer_token("test_access_token")
+    let client = KisClient::builder(Environment::Real)
+        .app_credentials(AppCredentials::new(
+            std::env::var("KIS_APP_KEY").expect("KIS_APP_KEY is required"),
+            std::env::var("KIS_APP_SECRET").expect("KIS_APP_SECRET is required"),
+        ))
         .build()?;
 
     let quote = client
@@ -131,11 +114,11 @@ The typed SDK currently exposes:
 | `issue_realtime_approval_key` | `/oauth2/Approval` | Issues a WebSocket access approval key only; live WebSocket subscription management is outside the current typed API. |
 | `inquire_domestic_stock_price` | `/uapi/domestic-stock/v1/quotations/inquire-price` | Domestic stock quote read. |
 | `inquire_domestic_stock_balance` | `/uapi/domestic-stock/v1/trading/inquire-balance` | Domestic stock balance read. |
-| `place_domestic_stock_cash_order` | `/uapi/domestic-stock/v1/trading/order-cash` | Mock cash orders are supported; real cash orders are locally blocked by `KisError::LiveTradingDisabled`. |
-| `execute_domestic_stock_realtime_tryitout` | `/tryitout/*` | Domain-scoped inventory execution for 29 domestic stock realtime tryitout/mock-contract endpoints. This is not a live WebSocket subscription API. |
+| `place_domestic_stock_cash_order` | `/uapi/domestic-stock/v1/trading/order-cash` | Real cash orders are locally blocked by `KisError::LiveTradingDisabled`. |
+| `execute_domestic_stock_realtime_tryitout` | `/tryitout/*` | Domain-scoped inventory execution for 29 domestic stock realtime tryitout endpoints. This is not a live WebSocket subscription API. |
 | `execute_bond_trading_account` | `/uapi/domestic-bond/v1/trading/*` | Domain-scoped inventory execution for 7 listed bond trading/account endpoints. Real trading mutations remain locally blocked. |
 | `execute_bond_quotation` | `/uapi/domestic-bond/v1/quotations/*` | Domain-scoped inventory execution for 8 listed bond quotation endpoints. |
-| `execute_bond_realtime_tryitout` | `/tryitout/*` | Domain-scoped inventory execution for 3 listed bond realtime tryitout/mock-contract endpoints. This is not a live WebSocket subscription API. |
+| `execute_bond_realtime_tryitout` | `/tryitout/*` | Domain-scoped inventory execution for 3 listed bond realtime tryitout endpoints. This is not a live WebSocket subscription API. |
 | `execute_overseas_futures_options` | 35 overseas futures/options inventory endpoints | Collection-specific wrapper keyed by `OverseasFuturesOptionsEndpoint`; all bundled endpoints are real-only, required fields are validated from inventory, and real trading mutations are locally blocked. |
 
 The domestic futures/options SDK surface exposes inventory-backed domain
@@ -250,9 +233,9 @@ let response = client
 ```
 
 The realtime helpers intentionally execute the REST-style inventory tryitout
-shape used by the bundled mock contract. Future live WebSocket subscription
-support should use a separate API so callers do not confuse mock/tryitout
-coverage with streaming behavior.
+shape captured in the bundled official inventory. Future live WebSocket
+subscription support should use a separate API so callers do not confuse
+tryitout coverage with streaming behavior.
 
 ## Credentials And Safety
 
@@ -266,8 +249,6 @@ coverage with streaming behavior.
 - `SecretString` redacts debug output, but callers must still avoid logging raw
   values before constructing SDK types.
 - Real trading mutations are blocked locally in the current implementation.
-  Mock cash-order examples are for integration testing only and do not execute
-  live orders.
 
 ## Testing And Verification
 
@@ -285,6 +266,9 @@ Contract evidence is recorded in
 [`docs/contract-quality-report.md`](docs/contract-quality-report.md). The
 mock-server test suite requests every bundled endpoint and verifies expected
 mock support or explicit `KIS_MOCK_UNSUPPORTED_ENVIRONMENT` rejection.
+The developer-only mock server guide is available at
+[`docs/mock-server/README.md`](docs/mock-server/README.md) for contract and
+test-harness validation.
 
 ## Architecture
 
@@ -299,10 +283,6 @@ mock support or explicit `KIS_MOCK_UNSUPPORTED_ENVIRONMENT` rejection.
 
 - [Crates.io publish workflow](docs/release/crates-publish.md)
 
-## Mock Server
-
-- [KIS Mock Server](docs/mock-server/README.md)
-
 ## Package Readiness
 
 This repository is prepared for an authorized crates.io publish, but publishing
@@ -310,9 +290,10 @@ has not been performed from this branch.
 
 - `Cargo.toml` includes package name, version, edition, license, description,
   repository, README, and keywords.
-- README and usage documentation avoid secrets and use local/mock placeholders.
-- The mock server and contract-quality report provide package validation
-  evidence without live KIS credentials.
+- README and usage documentation avoid secrets and use placeholder-only
+  examples.
+- The developer mock-server harness and contract-quality report provide package
+  validation evidence without live KIS credentials.
 - The publish workflow runs `scripts/verify-crates-publishable.py` before the
   third-party publish action so `publish = false` or registry restrictions
   cannot produce a false-positive empty publish.
