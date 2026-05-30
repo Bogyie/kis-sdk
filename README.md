@@ -29,6 +29,8 @@ more ergonomic typed wrappers.
   workflows.
 - Typed domestic stock methods for quotation price, balance inquiry, and cash
   order calls.
+- Domain-scoped inventory helpers for 29 domestic stock realtime tryitout
+  endpoints and 18 listed bond endpoints.
 - Collection-specific overseas futures/options inventory wrapper covering all
   35 order/account, quotation, and realtime endpoints from the bundled
   official inventory.
@@ -112,6 +114,10 @@ The typed SDK currently exposes:
 | `inquire_domestic_stock_price` | `/uapi/domestic-stock/v1/quotations/inquire-price` | Domestic stock quote read. |
 | `inquire_domestic_stock_balance` | `/uapi/domestic-stock/v1/trading/inquire-balance` | Domestic stock balance read. |
 | `place_domestic_stock_cash_order` | `/uapi/domestic-stock/v1/trading/order-cash` | Mock cash orders are supported; real cash orders are locally blocked by `KisError::LiveTradingDisabled`. |
+| `execute_domestic_stock_realtime_tryitout` | `/tryitout/*` | Domain-scoped inventory execution for 29 domestic stock realtime tryitout/mock-contract endpoints. This is not a live WebSocket subscription API. |
+| `execute_bond_trading_account` | `/uapi/domestic-bond/v1/trading/*` | Domain-scoped inventory execution for 7 listed bond trading/account endpoints. Real trading mutations remain locally blocked. |
+| `execute_bond_quotation` | `/uapi/domestic-bond/v1/quotations/*` | Domain-scoped inventory execution for 8 listed bond quotation endpoints. |
+| `execute_bond_realtime_tryitout` | `/tryitout/*` | Domain-scoped inventory execution for 3 listed bond realtime tryitout/mock-contract endpoints. This is not a live WebSocket subscription API. |
 | `execute_overseas_futures_options` | 35 overseas futures/options inventory endpoints | Collection-specific wrapper keyed by `OverseasFuturesOptionsEndpoint`; all bundled endpoints are real-only, required fields are validated from inventory, and real trading mutations are locally blocked. |
 
 The bundled inventory covers 338 official endpoints across 22 collections.
@@ -139,6 +145,11 @@ methods: required query/body/non-standard header fields are validated before
 network I/O, standard KIS headers are filled by the client, ambiguous TR IDs
 require an explicit override, real-only endpoints are rejected in mock mode, and
 real trading mutations are locally blocked.
+
+The realtime helpers intentionally execute the REST-style inventory tryitout
+shape used by the bundled mock contract. Future live WebSocket subscription
+support should use a separate API so callers do not confuse mock/tryitout
+coverage with streaming behavior.
 
 ## Credentials And Safety
 
