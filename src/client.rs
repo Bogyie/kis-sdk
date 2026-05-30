@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Instant};
+use std::{fmt, sync::Arc, time::Instant};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -61,12 +61,47 @@ pub struct FallbackDecision {
     pub to_base_url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct AccessTokenResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: u64,
     pub access_token_token_expired: Option<String>,
+}
+
+impl fmt::Debug for AccessTokenResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AccessTokenResponse")
+            .field("access_token", &"[REDACTED]")
+            .field("token_type", &self.token_type)
+            .field("expires_in", &self.expires_in)
+            .field(
+                "access_token_token_expired",
+                &self.access_token_token_expired,
+            )
+            .finish()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RevokeTokenResponse {
+    pub code: u16,
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+pub struct RealtimeApprovalKeyResponse {
+    pub approval_key: String,
+}
+
+impl fmt::Debug for RealtimeApprovalKeyResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RealtimeApprovalKeyResponse")
+            .field("approval_key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 pub struct KisClientBuilder {
@@ -111,19 +146,74 @@ impl KisClient {
             appsecret: &'a str,
         }
 
-        let response = self
-            .http
-            .post(format!("{}/oauth2/tokenP", self.config.base_url))
-            .json(&TokenRequest {
+        self.post_auth(
+            "/oauth2/tokenP",
+            &TokenRequest {
                 grant_type: "client_credentials",
                 appkey: credentials.app_key(),
                 appsecret: credentials.app_secret(),
-            })
-            .send()
-            .await
-            .map_err(|error| KisError::Transport(error.to_string()))?;
+            },
+        )
+        .await
+    }
 
-        parse_response(response).await
+    pub async fn revoke_access_token(
+        &self,
+        token: impl AsRef<str>,
+    ) -> Result<RevokeTokenResponse, KisError> {
+        let credentials = self
+            .credentials
+            .as_ref()
+            .ok_or(KisError::MissingCredentials)?;
+        let token = token.as_ref().trim();
+        if token.is_empty() {
+            return Err(KisError::Validation(
+                "token must not be empty for /oauth2/revokeP".to_string(),
+            ));
+        }
+
+        #[derive(Serialize)]
+        struct RevokeRequest<'a> {
+            appkey: &'a str,
+            appsecret: &'a str,
+            token: &'a str,
+        }
+
+        self.post_auth(
+            "/oauth2/revokeP",
+            &RevokeRequest {
+                appkey: credentials.app_key(),
+                appsecret: credentials.app_secret(),
+                token,
+            },
+        )
+        .await
+    }
+
+    pub async fn issue_realtime_approval_key(
+        &self,
+    ) -> Result<RealtimeApprovalKeyResponse, KisError> {
+        let credentials = self
+            .credentials
+            .as_ref()
+            .ok_or(KisError::MissingCredentials)?;
+
+        #[derive(Serialize)]
+        struct ApprovalRequest<'a> {
+            grant_type: &'static str,
+            appkey: &'a str,
+            secretkey: &'a str,
+        }
+
+        self.post_auth(
+            "/oauth2/Approval",
+            &ApprovalRequest {
+                grant_type: "client_credentials",
+                appkey: credentials.app_key(),
+                secretkey: credentials.app_secret(),
+            },
+        )
+        .await
     }
 
     pub(crate) async fn execute<Q, B, T>(
@@ -305,6 +395,22 @@ impl KisClient {
             .send()
             .await
             .map_err(|error| KisError::Transport(error.to_string()))?;
+        parse_response(response).await
+    }
+
+    async fn post_auth<B, T>(&self, path: &str, body: &B) -> Result<T, KisError>
+    where
+        B: Serialize + ?Sized,
+        T: DeserializeOwned,
+    {
+        let response = self
+            .http
+            .post(format!("{}{}", self.config.base_url, path))
+            .json(body)
+            .send()
+            .await
+            .map_err(|error| KisError::Transport(error.to_string()))?;
+
         parse_response(response).await
     }
 
