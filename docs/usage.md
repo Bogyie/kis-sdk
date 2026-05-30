@@ -5,11 +5,15 @@ implementation. It is written for application developers who want to test
 against the bundled mock server first and then wire real KIS credentials through
 their own secret-management path.
 
-The typed SDK surface currently covers OAuth token issuance, domestic stock
-price inquiry, domestic stock balance inquiry, and domestic stock cash-order
-requests. The bundled mock server covers the captured official endpoint
-inventory more broadly, but endpoints outside the typed surface are not yet
-available as first-class Rust methods.
+The typed SDK surface currently covers OAuth token issuance and revoke,
+WebSocket approval-key issuance, domestic stock price inquiry, domestic stock
+balance inquiry, and domestic stock cash-order requests. It also exposes
+inventory-backed overseas stock endpoint handles for 51 official endpoints.
+Domain-scoped inventory helpers cover domestic futures/options, 29 domestic
+stock realtime tryitout endpoints, and 18 listed bond endpoints. The shared
+inventory-backed execution API can also call every endpoint captured in
+`contracts/kis_official_endpoint_inventory.compact.json` by stable operation id
+while follow-on work adds more ergonomic typed wrappers.
 
 ## Prerequisites
 
@@ -76,6 +80,49 @@ fn mock_client(base_url: &str) -> Result<KisClient, kis_sdk::KisError> {
 These placeholder values are for local development only. They are not real KIS
 credentials and must not be copied into production configuration.
 
+## Manage OAuth Tokens And WebSocket Approval Keys
+
+Use `issue_access_token` when the application needs to fetch an OAuth bearer
+token directly:
+
+```rust
+async fn issue_token(client: &kis_sdk::KisClient) -> Result<String, kis_sdk::KisError> {
+    let token = client.issue_access_token().await?;
+    Ok(token.access_token)
+}
+```
+
+Use `revoke_access_token` to explicitly revoke a token. The SDK validates that
+the token is not blank before network I/O, and it never revokes tokens
+implicitly when a client is dropped:
+
+```rust
+async fn revoke_token(
+    client: &kis_sdk::KisClient,
+    token: &str,
+) -> Result<(), kis_sdk::KisError> {
+    let response = client.revoke_access_token(token).await?;
+    assert_eq!(response.code, 200);
+    Ok(())
+}
+```
+
+Use `issue_realtime_approval_key` to issue the `/oauth2/Approval` access key
+needed by KIS WebSocket clients:
+
+```rust
+async fn websocket_approval_key(
+    client: &kis_sdk::KisClient,
+) -> Result<String, kis_sdk::KisError> {
+    let response = client.issue_realtime_approval_key().await?;
+    Ok(response.approval_key)
+}
+```
+
+This method only issues the WebSocket approval key. The current typed SDK API
+does not manage live WebSocket sessions, subscriptions, reconnect behavior, or
+message decoding.
+
 ## Inquire A Domestic Stock Price
 
 ```rust
@@ -96,6 +143,204 @@ async fn inquire_price(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisEr
 
 The current output type preserves provider fields as `serde_json::Value` so the
 SDK can expose the endpoint before broad typed response structs are finalized.
+
+## Call An Inventory Endpoint
+
+Use `InventoryCatalog` to inspect generated operation ids and
+`execute_inventory` to call a captured endpoint directly:
+
+```rust
+use kis_sdk::endpoint::InventoryRequest;
+use serde_json::json;
+
+async fn inventory_quote(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_inventory::<serde_json::Value>(
+            "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": "005930"
+            })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
+
+For the listed domestic stock REST collections, `execute_domestic_stock_rest`
+adds a scope guard around the same inventory execution path. It covers 158
+endpoints across domestic stock trading/account, quotation, ELW, sector/misc,
+product info, market analysis, and ranking analysis collections. Realtime
+domestic stock endpoints remain outside this REST helper.
+
+```rust
+use kis_sdk::endpoint::InventoryRequest;
+use serde_json::json;
+
+async fn domestic_stock_rest_quote(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_domestic_stock_rest::<serde_json::Value>(
+            "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": "005930"
+            })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
+
+The inventory layer validates required query, body, and non-standard header
+fields before network I/O. Standard KIS headers such as `appkey`, `appsecret`,
+`authorization`, `custtype`, `content-type`, and unambiguous `tr_id` values are
+filled by the client. Endpoints with ambiguous TR IDs require
+`InventoryRequest::tr_id_override(...)`. Real-only endpoints are rejected in
+`Environment::Mock`, and real trading mutations remain blocked locally by
+`KisError::LiveTradingDisabled`.
+
+## Call An Overseas Stock Endpoint
+
+The overseas stock module pins all inventory-backed endpoints from the official
+overseas stock collections: 18 trading/account endpoints, 14 quotation
+endpoints, 15 market-analysis endpoints, and 4 realtime-quotation endpoints.
+Use the enum when you want a stable SDK handle instead of a raw operation-id
+string:
+
+```rust
+use kis_sdk::{
+    apis::overseas_stock::OverseasStockEndpoint,
+    endpoint::InventoryRequest,
+};
+use serde_json::json;
+
+async fn overseas_price(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_overseas_stock::<serde_json::Value>(
+            OverseasStockEndpoint::GetOverseasPriceQuotationsPrice,
+            InventoryRequest::new().query(json!({
+                "AUTH": "",
+                "EXCD": "NAS",
+                "SYMB": "AAPL"
+            })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
+
+Order endpoints keep the same safety boundary as domestic orders: live
+environment trading mutations return `KisError::LiveTradingDisabled` before
+network I/O. Overseas order TR IDs vary by country, exchange, and order side, so
+ambiguous inventory values require caller-supplied `tr_id_override(...)`.
+
+## Call A Domestic Futures/Options Endpoint
+
+Domestic futures/options coverage is exposed as a scoped inventory API for 44
+official endpoints: 15 trading/account endpoints, 9 quotation endpoints, and 20
+realtime quotation endpoints. The operation id constants are available from
+`kis_sdk::apis::domestic_futures_options`.
+
+```rust
+use kis_sdk::{
+    apis::domestic_futures_options::QUOTATION_OPERATION_IDS,
+    endpoint::InventoryRequest,
+};
+use serde_json::json;
+
+async fn domestic_futures_options_quote(
+    client: &kis_sdk::KisClient,
+) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_domestic_futures_options_quotation::<serde_json::Value>(
+            QUOTATION_OPERATION_IDS[0],
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "F",
+                "FID_INPUT_ISCD": "101W09"
+            })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
+
+Order-changing domestic futures/options endpoints keep the same SDK safety
+rules as other trading mutations. Inventory metadata with side/session-specific
+TR ID text requires `InventoryRequest::tr_id_override(...)`, and real
+environment trading mutations are blocked locally by
+`KisError::LiveTradingDisabled`.
+
+## Call A Realtime Tryitout Endpoint
+
+Realtime domain helpers use the REST-style `/tryitout/*` shape preserved in the
+official inventory and local mock contract. They are useful for mock-contract
+coverage and request validation, but they are not live WebSocket subscription
+APIs.
+
+```rust
+use kis_sdk::{
+    apis::domestic_stock_realtime,
+    endpoint::InventoryRequest,
+};
+use serde_json::json;
+
+async fn realtime_tryitout(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_domestic_stock_realtime_tryitout::<serde_json::Value>(
+            domestic_stock_realtime::REALTIME_TRADE_KRX,
+            InventoryRequest::new()
+                .header("approval_key", "test_approval_key")
+                .header("tr_type", "1")
+                .body(json!({
+                    "tr_id": "H0STCNT0",
+                    "tr_key": "005930"
+                })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
+
+## Call A Listed Bond Endpoint
+
+Listed bond helpers scope inventory execution to bond trading/account,
+quotation, or realtime tryitout operation id constants. Most listed bond
+endpoints in the bundled inventory are `real_only`, so mock-mode calls return
+`KisError::UnsupportedEnvironment`; real trading mutations are still blocked
+before network I/O.
+
+```rust
+use kis_sdk::{
+    apis::bond,
+    endpoint::InventoryRequest,
+};
+use serde_json::json;
+
+async fn bond_price(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_bond_quotation::<serde_json::Value>(
+            bond::INQUIRE_PRICE,
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "B",
+                "FID_INPUT_ISCD": "KR103502GA34"
+            })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
 
 ## Inquire A Domestic Stock Balance
 

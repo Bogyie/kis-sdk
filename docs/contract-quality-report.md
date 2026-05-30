@@ -37,7 +37,7 @@ Verification date: 2026-05-29 Asia/Seoul
 | Listed bond quotations | 8 | 0 | 8 |
 | Listed bond realtime | 3 | 0 | 3 |
 
-## SDK Typed Surface
+## SDK Surface
 
 The initial typed SDK surface intentionally exposes a narrow domestic stock slice:
 
@@ -46,18 +46,98 @@ The initial typed SDK surface intentionally exposes a narrow domestic stock slic
 | `issue_access_token` | POST | `/oauth2/tokenP` | Covered | Auth token issuance and in-memory token reuse. |
 | `inquire_domestic_stock_price` | GET | `/uapi/domestic-stock/v1/quotations/inquire-price` | Covered | Uses `FHKST01010100` for real and mock. |
 | `inquire_domestic_stock_balance` | GET | `/uapi/domestic-stock/v1/trading/inquire-balance` | Covered | Uses `TTTC8434R` real and `VTTC8434R` mock. |
-| `place_domestic_stock_cash_order` | POST | `/uapi/domestic-stock/v1/trading/order-cash` | Covered | Buy/sell TR IDs are selected by side and environment. Real trading is locally blocked unless a future live-trading guard is added. |
+| `place_domestic_stock_cash_order` | POST | `/uapi/domestic-stock/v1/trading/order-cash` | Covered | Buy/sell TR IDs are selected by side and environment. Real trading is locally blocked by `KisError::LiveTradingDisabled` before network I/O. |
+| `execute_overseas_futures_options` | Mixed | 35 `[해외선물옵션]` order/account, quotation, and realtime endpoints | Covered | Uses `OverseasFuturesOptionsEndpoint` enum plus bundled inventory validation. The whole slice is real-only in the captured contract, mock mode rejects it locally, live trading mutations remain disabled, and ambiguous revision/cancel TR IDs require caller override. |
 
-All other official endpoints are represented in the bundled contract and mock route inventory, but are not yet promoted to typed SDK request/response methods.
+## Domestic Futures/Options SDK Coverage
+
+The domestic futures/options child surface exposes scoped inventory-backed SDK
+methods for all 44 endpoints in the requested official collections:
+
+| Collection | Endpoint count | Mock support in inventory | SDK coverage |
+| --- | ---: | ---: | --- |
+| Domestic futures/options trading/account | 15 | 5 real+mock, 10 real-only | Covered by `execute_domestic_futures_options_trading_account` and `TRADING_ACCOUNT_OPERATION_IDS`. |
+| Domestic futures/options quotations | 9 | 3 real+mock, 6 real-only | Covered by `execute_domestic_futures_options_quotation` and `QUOTATION_OPERATION_IDS`. |
+| Domestic futures/options realtime | 20 | 1 real+mock, 19 real-only | Covered by `execute_domestic_futures_options_realtime_quotation` and `REALTIME_QUOTATION_OPERATION_IDS`. |
+
+The combined `execute_domestic_futures_options` method accepts the same 44
+operation ids and rejects operation ids outside the domestic futures/options
+collections before network I/O. Order-changing endpoints retain local
+`KisError::LiveTradingDisabled` protection in `Environment::Real`, and
+side/session-specific TR ID metadata requires explicit
+`InventoryRequest::tr_id_override(...)` selection.
+
+## Additional Domain-Scoped SDK Coverage
+
+Domain-scoped inventory helpers also expose stable operation-id constants and
+execution methods for these follow-on slices:
+
+| Domain helper | Covered collection | Endpoint count | Notes |
+| --- | --- | ---: | --- |
+| `execute_domestic_stock_realtime_tryitout` | Domestic stock realtime | 29 | REST-style `/tryitout/*` inventory/mock-contract execution only; not live WebSocket subscription behavior. |
+| `execute_bond_trading_account` | Listed bond trading/account | 7 | Real-only in bundled inventory; real trading mutations remain locally blocked. |
+| `execute_bond_quotation` | Listed bond quotations | 8 | Real-only in bundled inventory. |
+| `execute_bond_realtime_tryitout` | Listed bond realtime | 3 | REST-style `/tryitout/*` inventory/mock-contract execution only; not live WebSocket subscription behavior. |
+
+All remaining official endpoints are represented in the bundled contract and
+mock route inventory, and are SDK-callable through scoped inventory APIs or the
+lower-level `execute_inventory` API. They are not all promoted to narrow typed
+request/response structs.
+
+## Domestic Stock REST Inventory API
+
+`execute_domestic_stock_rest` exposes the listed domestic stock REST collections through the same inventory-backed request path while rejecting out-of-scope operation ids such as realtime domestic stock endpoints.
+
+| Collection | Endpoint count |
+| --- | ---: |
+| Domestic stock trading/account | 23 |
+| Domestic stock quotations | 22 |
+| Domestic stock ELW quotations | 22 |
+| Domestic stock industry/other | 14 |
+| Domestic stock item information | 26 |
+| Domestic stock chart/analysis | 29 |
+| Domestic stock rank analysis | 22 |
+| **Total domestic stock REST listed coverage** | **158** |
+
+Executable coverage in `tests/sdk_core.rs` verifies the 158-endpoint scoped catalog, rejects domestic stock realtime operation ids, executes all 18 `real+mock` endpoints against the generated mock contract with inventory-derived request data, and confirms all 140 `real_only` endpoints are rejected in mock mode before network I/O.
+
+## Final Inventory Reconciliation
+
+`tests/sdk_core.rs::full_inventory_reconciliation_accounts_for_every_official_endpoint_once`
+is the machine-checkable 338/338 reconciliation gate. It builds the bundled
+`InventoryCatalog`, assigns every official operation id to exactly one SDK
+coverage surface, rejects duplicate assignments, and fails if any inventory
+operation id is missing from the coverage map.
+
+| Coverage surface | Count | SDK-callable status |
+| --- | ---: | --- |
+| OAuth typed methods | 3 | Covered by typed auth methods: token issue, token revoke, realtime approval key. |
+| Domestic stock REST inventory API | 158 | Covered by `execute_domestic_stock_rest`; includes the narrower typed domestic stock methods. |
+| Domestic stock realtime tryout inventory API | 29 | Covered by `execute_domestic_stock_realtime_tryitout`; REST-style tryout/mock-contract calls only. |
+| Domestic futures/options inventory API | 44 | Covered by domestic futures/options scoped inventory wrappers and operation-id constants. |
+| Overseas stock inventory API | 51 | Covered by `OverseasStockEndpoint` plus `execute_overseas_stock`. |
+| Overseas futures/options inventory API | 35 | Covered by `OverseasFuturesOptionsEndpoint` plus `execute_overseas_futures_options`. |
+| Listed bond inventory API | 18 | Covered by bond trading/account, quotation, and realtime tryout scoped inventory wrappers. |
+| **Total accounted official inventory** | **338** | **338/338 accounted; no unassigned official endpoint remains.** |
+
+This reconciliation intentionally distinguishes typed request/response methods
+from inventory-backed SDK-callable APIs. Endpoints without narrow typed Rust
+request/response structs remain callable through their scoped inventory API or
+the lower-level `execute_inventory` path with inventory-derived validation.
 
 ## Mock Contract Evidence
 
 The mock server loads the bundled contract through `ContractInventory::bundled()` and builds its route index from every `(method, path)` pair.
 
-Executable coverage added in `tests/mock_server_contract.rs`:
+Executable coverage added in `tests/mock_server_contract.rs` and
+`tests/sdk_core.rs`:
 
 - Validates source metadata: official URL, checked date, 338 endpoints, 22 collections.
 - Verifies route index cardinality equals the official endpoint count.
+- Verifies the final 338/338 reconciliation map assigns every official endpoint
+  to exactly one SDK coverage surface.
+- Verifies domestic futures/options, domestic stock realtime, and listed bond
+  domain helper constants cover their 91 targeted inventory endpoints exactly.
 - Starts the mock server and requests every bundled endpoint.
 - Confirms 3 auth endpoints return success.
 - Confirms 43 non-auth `real+mock` endpoints return KIS success envelopes when required headers/TR IDs are supplied.
@@ -70,6 +150,10 @@ Executable coverage added in `tests/mock_server_contract.rs`:
 - Real-to-mock fallback is opt-in and read-only. POST trading fallback is rejected by policy.
 - Fallback requires separate fallback credentials and fallback bearer token, preventing primary real credentials from crossing into the mock fallback target.
 - Real cash orders are blocked locally by `KisError::LiveTradingDisabled` before network I/O.
+- Domestic futures/options order mutations are blocked locally by `KisError::LiveTradingDisabled` before network I/O.
+- Domestic futures/options side/session-specific order TR ID metadata requires the caller to choose the concrete TR ID.
+- Overseas futures/options order mutations are blocked locally by `KisError::LiveTradingDisabled` before network I/O.
+- Overseas futures/options revision/cancel keeps the captured ambiguous TR ID boundary and requires the caller to choose the concrete TR ID.
 - Account/order request validation rejects malformed account, product, quantity, and price fields before network I/O.
 - Secret debug output uses redaction and does not expose raw secret values.
 - The SDK reuses one `reqwest::Client` per `KisClient` and caches issued bearer tokens in memory until the configured refresh skew.
@@ -78,6 +162,6 @@ Executable coverage added in `tests/mock_server_contract.rs`:
 ## Known Limitations
 
 - BOG-221 source collection is a captured official inventory. This report does not perform a live re-scrape of the official portal.
-- Request and response schemas are preserved as contract metadata and mock output field names, but broad typed Rust structs have only been implemented for the initial domestic stock slice above.
+- Request and response schemas are preserved as contract metadata and mock output field names, but broad typed Rust structs have only been implemented for the initial domestic stock slice above. Other endpoints are SDK-callable through inventory-backed APIs rather than narrow typed request/response structs.
 - Ambiguous TR ID endpoints remain represented in the contract. Generic mock routing accepts them without forcing one side-specific TR ID unless the contract exposes a single concrete TR ID.
 - No production KIS credentials, account data, live trading, or live API calls were used.
