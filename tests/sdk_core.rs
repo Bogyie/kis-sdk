@@ -96,6 +96,109 @@ fn inventory_catalog_addresses_every_official_endpoint_with_unique_operation_ids
 }
 
 #[test]
+fn full_inventory_reconciliation_accounts_for_every_official_endpoint_once() {
+    let catalog = InventoryCatalog::bundled().expect("inventory catalog builds");
+    let mut coverage = BTreeMap::<&str, HashSet<String>>::new();
+
+    coverage.insert(
+        "oauth_typed_methods",
+        HashSet::from([
+            "oauth_authentication.post_oauth2_tokenp".to_string(),
+            "oauth_authentication.post_oauth2_revokep".to_string(),
+            "oauth_authentication.post_oauth2_approval".to_string(),
+        ]),
+    );
+    coverage.insert(
+        "domestic_stock_rest_inventory_api",
+        domestic_stock_rest_endpoints()
+            .expect("domestic stock REST catalog builds")
+            .iter()
+            .map(|endpoint| endpoint.operation_id.clone())
+            .collect(),
+    );
+    coverage.insert(
+        "domestic_stock_realtime_tryitout_inventory_api",
+        DOMESTIC_STOCK_REALTIME_TRYITOUT_OPERATIONS
+            .iter()
+            .map(|operation_id| (*operation_id).to_string())
+            .collect(),
+    );
+    coverage.insert(
+        "domestic_futures_options_inventory_api",
+        domestic_futures_options_operation_ids()
+            .map(str::to_string)
+            .collect(),
+    );
+    coverage.insert(
+        "overseas_stock_inventory_api",
+        OverseasStockEndpoint::all()
+            .iter()
+            .map(|endpoint| endpoint.operation_id().to_string())
+            .collect(),
+    );
+    coverage.insert(
+        "overseas_futures_options_inventory_api",
+        OverseasFuturesOptionsEndpoint::ALL
+            .iter()
+            .map(|endpoint| endpoint.operation_id().to_string())
+            .collect(),
+    );
+    coverage.insert(
+        "listed_bond_inventory_api",
+        BOND_TRADING_ACCOUNT_OPERATIONS
+            .iter()
+            .chain(BOND_QUOTATION_OPERATIONS.iter())
+            .chain(BOND_REALTIME_TRYITOUT_OPERATIONS.iter())
+            .map(|operation_id| (*operation_id).to_string())
+            .collect(),
+    );
+
+    let official = catalog
+        .endpoints()
+        .iter()
+        .map(|endpoint| endpoint.operation_id.clone())
+        .collect::<HashSet<_>>();
+    let mut accounted = HashSet::new();
+
+    for (surface, operation_ids) in &coverage {
+        assert!(!operation_ids.is_empty(), "{surface} must not be empty");
+        for operation_id in operation_ids {
+            assert!(
+                official.contains(operation_id),
+                "{surface} includes unknown operation id {operation_id}"
+            );
+            assert!(
+                accounted.insert(operation_id.clone()),
+                "{operation_id} is assigned to more than one inventory coverage surface"
+            );
+        }
+    }
+
+    let missing = official.difference(&accounted).cloned().collect::<Vec<_>>();
+    let unexpected = accounted.difference(&official).cloned().collect::<Vec<_>>();
+
+    assert_eq!(accounted.len(), 338);
+    assert!(
+        missing.is_empty(),
+        "unaccounted inventory endpoints: {missing:?}"
+    );
+    assert!(
+        unexpected.is_empty(),
+        "coverage references non-inventory endpoints: {unexpected:?}"
+    );
+    assert_eq!(coverage["oauth_typed_methods"].len(), 3);
+    assert_eq!(coverage["domestic_stock_rest_inventory_api"].len(), 158);
+    assert_eq!(
+        coverage["domestic_stock_realtime_tryitout_inventory_api"].len(),
+        29
+    );
+    assert_eq!(coverage["domestic_futures_options_inventory_api"].len(), 44);
+    assert_eq!(coverage["overseas_stock_inventory_api"].len(), 51);
+    assert_eq!(coverage["overseas_futures_options_inventory_api"].len(), 35);
+    assert_eq!(coverage["listed_bond_inventory_api"].len(), 18);
+}
+
+#[test]
 fn inventory_operation_kind_uses_contract_kind_not_http_method_only() {
     let catalog = InventoryCatalog::bundled().expect("inventory catalog builds");
 

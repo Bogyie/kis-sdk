@@ -3,11 +3,11 @@
 Rust SDK core for Korea Investment & Securities Open API.
 
 `kis-sdk` is an early Rust client and local mock contract harness for KIS Open
-API integrations. The current typed SDK surface is intentionally narrow: it
-focuses on OAuth token issuance and a small domestic stock slice. A lower-level
-inventory-backed execution API can address and call the broader bundled
-official endpoint inventory by stable operation id while follow-on work adds
-more ergonomic typed wrappers.
+API integrations. The narrow typed SDK surface focuses on OAuth token issuance
+and a small domestic stock slice, while inventory-backed SDK APIs account for
+all 338 endpoints in the bundled official inventory by stable operation id.
+Follow-on work can add more ergonomic typed wrappers without changing the
+current coverage boundary.
 
 ## Current Status
 
@@ -18,6 +18,8 @@ more ergonomic typed wrappers.
 - Supported runtime: async Rust with `tokio`, `reqwest`, and rustls TLS.
 - Official contract snapshot: `contracts/kis_official_endpoint_inventory.compact.json`,
   captured on 2026-05-29 Asia/Seoul.
+- Inventory reconciliation: 338/338 official endpoints are accounted for by
+  typed methods, scoped inventory APIs, or lower-level `execute_inventory`.
 
 ## Features
 
@@ -112,6 +114,14 @@ async fn main() -> Result<(), kis_sdk::KisError> {
 
 ## Supported API Scope
 
+The current SDK surface has two layers:
+
+- Typed methods for OAuth and selected domestic stock workflows.
+- Inventory-backed methods for the full bundled official endpoint inventory.
+  These methods validate required inventory fields and safety rules before
+  network I/O, but they do not yet provide narrow Rust request/response structs
+  for every endpoint.
+
 The typed SDK currently exposes:
 
 | Method | KIS path | Notes |
@@ -187,6 +197,29 @@ network I/O, standard KIS headers are filled by the client, ambiguous TR IDs
 require an explicit override, real-only endpoints are rejected in mock mode, and
 real trading mutations are locally blocked.
 
+## Endpoint Inventory Coverage
+
+The machine-checkable reconciliation test
+`full_inventory_reconciliation_accounts_for_every_official_endpoint_once`
+proves that every endpoint in the bundled official inventory is assigned to
+exactly one SDK-callable coverage surface:
+
+| Coverage surface | Endpoint count |
+| --- | ---: |
+| OAuth typed methods | 3 |
+| Domestic stock REST inventory API | 158 |
+| Domestic stock realtime tryitout inventory API | 29 |
+| Domestic futures/options inventory API | 44 |
+| Overseas stock inventory API | 51 |
+| Overseas futures/options inventory API | 35 |
+| Listed bond inventory API | 18 |
+| **Total accounted official inventory** | **338/338** |
+
+See [`docs/contract-quality-report.md`](docs/contract-quality-report.md) for
+the collection split, mock-contract evidence, and known limitations. The
+coverage count is based on the captured BOG-221 inventory snapshot, not a live
+portal re-scrape.
+
 The overseas stock SDK surface pins inventory-backed endpoint handles for these
 collections:
 
@@ -242,9 +275,10 @@ Repository checks used for the current SDK and documentation baseline:
 
 ```sh
 cargo fmt --check
-cargo check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo test --locked
+cargo test --locked --test mock_server_contract
+cargo doc --locked --no-deps
+git diff --check
 ```
 
 Contract evidence is recorded in
@@ -259,6 +293,7 @@ mock support or explicit `KIS_MOCK_UNSUPPORTED_ENVIRONMENT` rejection.
 ## Usage Guide
 
 - [KIS SDK usage guide](docs/usage.md)
+- [KIS SDK Korean usage guide](docs/usage-ko.md)
 
 ## Release
 

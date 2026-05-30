@@ -79,9 +79,10 @@ execution methods for these follow-on slices:
 | `execute_bond_quotation` | Listed bond quotations | 8 | Real-only in bundled inventory. |
 | `execute_bond_realtime_tryitout` | Listed bond realtime | 3 | REST-style `/tryitout/*` inventory/mock-contract execution only; not live WebSocket subscription behavior. |
 
-The remaining official endpoints are represented in the bundled contract and
-mock route inventory, but are not yet promoted to typed SDK request/response
-methods or domain-scoped wrappers.
+All remaining official endpoints are represented in the bundled contract and
+mock route inventory, and are SDK-callable through scoped inventory APIs or the
+lower-level `execute_inventory` API. They are not all promoted to narrow typed
+request/response structs.
 
 ## Domestic Stock REST Inventory API
 
@@ -100,6 +101,30 @@ methods or domain-scoped wrappers.
 
 Executable coverage in `tests/sdk_core.rs` verifies the 158-endpoint scoped catalog, rejects domestic stock realtime operation ids, executes all 18 `real+mock` endpoints against the generated mock contract with inventory-derived request data, and confirms all 140 `real_only` endpoints are rejected in mock mode before network I/O.
 
+## Final Inventory Reconciliation
+
+`tests/sdk_core.rs::full_inventory_reconciliation_accounts_for_every_official_endpoint_once`
+is the machine-checkable 338/338 reconciliation gate. It builds the bundled
+`InventoryCatalog`, assigns every official operation id to exactly one SDK
+coverage surface, rejects duplicate assignments, and fails if any inventory
+operation id is missing from the coverage map.
+
+| Coverage surface | Count | SDK-callable status |
+| --- | ---: | --- |
+| OAuth typed methods | 3 | Covered by typed auth methods: token issue, token revoke, realtime approval key. |
+| Domestic stock REST inventory API | 158 | Covered by `execute_domestic_stock_rest`; includes the narrower typed domestic stock methods. |
+| Domestic stock realtime tryout inventory API | 29 | Covered by `execute_domestic_stock_realtime_tryitout`; REST-style tryout/mock-contract calls only. |
+| Domestic futures/options inventory API | 44 | Covered by domestic futures/options scoped inventory wrappers and operation-id constants. |
+| Overseas stock inventory API | 51 | Covered by `OverseasStockEndpoint` plus `execute_overseas_stock`. |
+| Overseas futures/options inventory API | 35 | Covered by `OverseasFuturesOptionsEndpoint` plus `execute_overseas_futures_options`. |
+| Listed bond inventory API | 18 | Covered by bond trading/account, quotation, and realtime tryout scoped inventory wrappers. |
+| **Total accounted official inventory** | **338** | **338/338 accounted; no unassigned official endpoint remains.** |
+
+This reconciliation intentionally distinguishes typed request/response methods
+from inventory-backed SDK-callable APIs. Endpoints without narrow typed Rust
+request/response structs remain callable through their scoped inventory API or
+the lower-level `execute_inventory` path with inventory-derived validation.
+
 ## Mock Contract Evidence
 
 The mock server loads the bundled contract through `ContractInventory::bundled()` and builds its route index from every `(method, path)` pair.
@@ -109,6 +134,8 @@ Executable coverage added in `tests/mock_server_contract.rs` and
 
 - Validates source metadata: official URL, checked date, 338 endpoints, 22 collections.
 - Verifies route index cardinality equals the official endpoint count.
+- Verifies the final 338/338 reconciliation map assigns every official endpoint
+  to exactly one SDK coverage surface.
 - Verifies domestic futures/options, domestic stock realtime, and listed bond
   domain helper constants cover their 91 targeted inventory endpoints exactly.
 - Starts the mock server and requests every bundled endpoint.
@@ -135,6 +162,6 @@ Executable coverage added in `tests/mock_server_contract.rs` and
 ## Known Limitations
 
 - BOG-221 source collection is a captured official inventory. This report does not perform a live re-scrape of the official portal.
-- Request and response schemas are preserved as contract metadata and mock output field names, but broad typed Rust structs have only been implemented for the initial domestic stock slice above.
+- Request and response schemas are preserved as contract metadata and mock output field names, but broad typed Rust structs have only been implemented for the initial domestic stock slice above. Other endpoints are SDK-callable through inventory-backed APIs rather than narrow typed request/response structs.
 - Ambiguous TR ID endpoints remain represented in the contract. Generic mock routing accepts them without forcing one side-specific TR ID unless the contract exposes a single concrete TR ID.
 - No production KIS credentials, account data, live trading, or live API calls were used.
