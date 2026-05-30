@@ -48,7 +48,7 @@ Expected successful guard output includes the package name and version, for exam
 
 ```text
 Publishable crates.io package(s):
-- kis-sdk 0.1.0
+- kis-sdk 0.2.1
 ```
 
 If a release workflow succeeds but crates.io does not show the crate, check the publish job log for the guard output, the `Publish crate` step, and the action's crates.io propagation check. A missing guard output or an empty action package list indicates the publish path did not prove that a workspace package was publishable.
