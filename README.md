@@ -37,6 +37,9 @@ more ergonomic typed wrappers.
 - Inventory-backed `execute_inventory` support for the bundled official
   endpoint inventory, including required input/header validation and TR ID
   selection rules from the captured metadata.
+- Domestic stock REST `execute_domestic_stock_rest` support for the 158 listed
+  endpoints across the domestic stock trading/account, quotation, ELW,
+  sector/misc, product info, market analysis, and ranking analysis collections.
 - Local mock server generated from the bundled official endpoint inventory.
 - Explicit `RetryPolicy` and `FallbackPolicy` options. Retry is disabled by
   default. `RetryPolicy::conservative_reads()` retries retryable GET/read
@@ -131,6 +134,24 @@ use serde_json::json;
 
 let response = client
     .execute_inventory::<serde_json::Value>(
+        "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
+        InventoryRequest::new().query(json!({
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": "005930"
+        })),
+    )
+    .await?;
+```
+
+For domestic stock REST coverage, prefer the scoped helper when the operation
+must stay inside the listed domestic stock REST collections:
+
+```rust
+use kis_sdk::endpoint::InventoryRequest;
+use serde_json::json;
+
+let response = client
+    .execute_domestic_stock_rest::<serde_json::Value>(
         "domestic_stock_quotation.get_domestic_stock_quotations_inquire_price",
         InventoryRequest::new().query(json!({
             "FID_COND_MRKT_DIV_CODE": "J",

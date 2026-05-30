@@ -46,7 +46,7 @@ The initial typed SDK surface intentionally exposes a narrow domestic stock slic
 | `issue_access_token` | POST | `/oauth2/tokenP` | Covered | Auth token issuance and in-memory token reuse. |
 | `inquire_domestic_stock_price` | GET | `/uapi/domestic-stock/v1/quotations/inquire-price` | Covered | Uses `FHKST01010100` for real and mock. |
 | `inquire_domestic_stock_balance` | GET | `/uapi/domestic-stock/v1/trading/inquire-balance` | Covered | Uses `TTTC8434R` real and `VTTC8434R` mock. |
-| `place_domestic_stock_cash_order` | POST | `/uapi/domestic-stock/v1/trading/order-cash` | Covered | Buy/sell TR IDs are selected by side and environment. Real trading is locally blocked. |
+| `place_domestic_stock_cash_order` | POST | `/uapi/domestic-stock/v1/trading/order-cash` | Covered | Buy/sell TR IDs are selected by side and environment. Real trading is locally blocked by `KisError::LiveTradingDisabled` before network I/O. |
 | `execute_overseas_futures_options` | Mixed | 35 `[해외선물옵션]` order/account, quotation, and realtime endpoints | Covered | Uses `OverseasFuturesOptionsEndpoint` enum plus bundled inventory validation. The whole slice is real-only in the captured contract, mock mode rejects it locally, live trading mutations remain disabled, and ambiguous revision/cancel TR IDs require caller override. |
 
 Domain-scoped inventory helpers also expose stable operation-id constants and
@@ -62,6 +62,23 @@ execution methods for these follow-on slices:
 The remaining official endpoints are represented in the bundled contract and
 mock route inventory, but are not yet promoted to typed SDK request/response
 methods.
+
+## Domestic Stock REST Inventory API
+
+`execute_domestic_stock_rest` exposes the listed domestic stock REST collections through the same inventory-backed request path while rejecting out-of-scope operation ids such as realtime domestic stock endpoints.
+
+| Collection | Endpoint count |
+| --- | ---: |
+| Domestic stock trading/account | 23 |
+| Domestic stock quotations | 22 |
+| Domestic stock ELW quotations | 22 |
+| Domestic stock industry/other | 14 |
+| Domestic stock item information | 26 |
+| Domestic stock chart/analysis | 29 |
+| Domestic stock rank analysis | 22 |
+| **Total domestic stock REST listed coverage** | **158** |
+
+Executable coverage in `tests/sdk_core.rs` verifies the 158-endpoint scoped catalog, rejects domestic stock realtime operation ids, executes all 18 `real+mock` endpoints against the generated mock contract with inventory-derived request data, and confirms all 140 `real_only` endpoints are rejected in mock mode before network I/O.
 
 ## Mock Contract Evidence
 

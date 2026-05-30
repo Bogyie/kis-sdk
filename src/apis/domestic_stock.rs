@@ -1,13 +1,28 @@
 use http::Method;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
     client::{KisClient, KisEnvelope},
     credentials::Account,
-    endpoint::{EndpointSpec, OperationKind},
+    endpoint::{
+        EndpointSpec, InventoryCatalog, InventoryEndpointSpec, InventoryRequest, OperationKind,
+    },
     error::KisError,
 };
+
+pub const DOMESTIC_STOCK_REST_ENDPOINT_COUNT: usize = 158;
+
+pub const DOMESTIC_STOCK_REST_COLLECTIONS: &[&str] = &[
+    "[국내주식] 주문/계좌",
+    "[국내주식] 기본시세",
+    "[국내주식] ELW 시세",
+    "[국내주식] 업종/기타",
+    "[국내주식] 종목정보",
+    "[국내주식] 시세분석",
+    "[국내주식] 순위분석",
+];
 
 const INQUIRE_PRICE: EndpointSpec = EndpointSpec {
     id: "domestic_stock.inquire_price",
@@ -190,6 +205,42 @@ impl KisClient {
         self.execute(&ORDER_CASH, Option::<&()>::None, Some(request), Some(tr_id))
             .await
     }
+
+    pub async fn execute_domestic_stock_rest<T>(
+        &self,
+        operation_id: &str,
+        request: InventoryRequest,
+    ) -> Result<KisEnvelope<T>, KisError>
+    where
+        T: DeserializeOwned,
+    {
+        let catalog = InventoryCatalog::bundled()?;
+        let endpoint = catalog.endpoint(operation_id).ok_or_else(|| {
+            KisError::Contract(format!("missing inventory operation id {operation_id}"))
+        })?;
+
+        if !is_domestic_stock_rest_collection(&endpoint.collection_name) {
+            return Err(KisError::Contract(format!(
+                "operation {operation_id} is not in domestic stock REST coverage"
+            )));
+        }
+
+        self.execute_inventory(operation_id, request).await
+    }
+}
+
+pub fn domestic_stock_rest_endpoints() -> Result<Vec<InventoryEndpointSpec>, KisError> {
+    let catalog = InventoryCatalog::bundled()?;
+    Ok(catalog
+        .endpoints()
+        .iter()
+        .filter(|endpoint| is_domestic_stock_rest_collection(&endpoint.collection_name))
+        .cloned()
+        .collect())
+}
+
+pub fn is_domestic_stock_rest_collection(collection_name: &str) -> bool {
+    DOMESTIC_STOCK_REST_COLLECTIONS.contains(&collection_name)
 }
 
 fn require_digits(name: &str, value: &str, len: usize) -> Result<(), KisError> {
