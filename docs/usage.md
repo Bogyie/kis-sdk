@@ -7,9 +7,11 @@ their own secret-management path.
 
 The typed SDK surface currently covers OAuth token issuance, domestic stock
 price inquiry, domestic stock balance inquiry, and domestic stock cash-order
-requests. The shared inventory-backed execution API can also call every endpoint
-captured in `contracts/kis_official_endpoint_inventory.compact.json` by stable
-operation id while follow-on work adds more ergonomic typed wrappers.
+requests. Domain-scoped inventory helpers cover 29 domestic stock realtime
+tryitout endpoints and 18 listed bond endpoints. The shared inventory-backed
+execution API can also call every endpoint captured in
+`contracts/kis_official_endpoint_inventory.compact.json` by stable operation id
+while follow-on work adds more ergonomic typed wrappers.
 
 ## Prerequisites
 
@@ -155,6 +157,70 @@ filled by the client. Endpoints with ambiguous TR IDs require
 `InventoryRequest::tr_id_override(...)`. Real-only endpoints are rejected in
 `Environment::Mock`, and real trading mutations remain blocked locally by
 `KisError::LiveTradingDisabled`.
+
+## Call A Realtime Tryitout Endpoint
+
+Realtime domain helpers use the REST-style `/tryitout/*` shape preserved in the
+official inventory and local mock contract. They are useful for mock-contract
+coverage and request validation, but they are not live WebSocket subscription
+APIs.
+
+```rust
+use kis_sdk::{
+    apis::domestic_stock_realtime,
+    endpoint::InventoryRequest,
+};
+use serde_json::json;
+
+async fn realtime_tryitout(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_domestic_stock_realtime_tryitout::<serde_json::Value>(
+            domestic_stock_realtime::REALTIME_TRADE_KRX,
+            InventoryRequest::new()
+                .header("approval_key", "test_approval_key")
+                .header("tr_type", "1")
+                .body(json!({
+                    "tr_id": "H0STCNT0",
+                    "tr_key": "005930"
+                })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
+
+## Call A Listed Bond Endpoint
+
+Listed bond helpers scope inventory execution to bond trading/account,
+quotation, or realtime tryitout operation id constants. Most listed bond
+endpoints in the bundled inventory are `real_only`, so mock-mode calls return
+`KisError::UnsupportedEnvironment`; real trading mutations are still blocked
+before network I/O.
+
+```rust
+use kis_sdk::{
+    apis::bond,
+    endpoint::InventoryRequest,
+};
+use serde_json::json;
+
+async fn bond_price(client: &kis_sdk::KisClient) -> Result<(), kis_sdk::KisError> {
+    let response = client
+        .execute_bond_quotation::<serde_json::Value>(
+            bond::INQUIRE_PRICE,
+            InventoryRequest::new().query(json!({
+                "FID_COND_MRKT_DIV_CODE": "B",
+                "FID_INPUT_ISCD": "KR103502GA34"
+            })),
+        )
+        .await?;
+
+    assert!(response.is_success());
+    Ok(())
+}
+```
 
 ## Inquire A Domestic Stock Balance
 
