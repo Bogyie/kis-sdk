@@ -47,6 +47,7 @@ The initial typed SDK surface intentionally exposes a narrow domestic stock slic
 | `inquire_domestic_stock_price` | GET | `/uapi/domestic-stock/v1/quotations/inquire-price` | Covered | Uses `FHKST01010100` for real and mock. |
 | `inquire_domestic_stock_balance` | GET | `/uapi/domestic-stock/v1/trading/inquire-balance` | Covered | Uses `TTTC8434R` real and `VTTC8434R` mock. |
 | `place_domestic_stock_cash_order` | POST | `/uapi/domestic-stock/v1/trading/order-cash` | Covered | Buy/sell TR IDs are selected by side and environment. Real trading is locally blocked by `KisError::LiveTradingDisabled` before network I/O. |
+| `execute_overseas_futures_options` | Mixed | 35 `[해외선물옵션]` order/account, quotation, and realtime endpoints | Covered | Uses `OverseasFuturesOptionsEndpoint` enum plus bundled inventory validation. The whole slice is real-only in the captured contract, mock mode rejects it locally, live trading mutations remain disabled, and ambiguous revision/cancel TR IDs require caller override. |
 
 All other official endpoints are represented in the bundled contract and mock route inventory, but are not yet promoted to typed SDK request/response methods.
 
@@ -87,6 +88,8 @@ Executable coverage added in `tests/mock_server_contract.rs`:
 - Real-to-mock fallback is opt-in and read-only. POST trading fallback is rejected by policy.
 - Fallback requires separate fallback credentials and fallback bearer token, preventing primary real credentials from crossing into the mock fallback target.
 - Real cash orders are blocked locally by `KisError::LiveTradingDisabled` before network I/O.
+- Overseas futures/options order mutations are blocked locally by `KisError::LiveTradingDisabled` before network I/O.
+- Overseas futures/options revision/cancel keeps the captured ambiguous TR ID boundary and requires the caller to choose the concrete TR ID.
 - Account/order request validation rejects malformed account, product, quantity, and price fields before network I/O.
 - Secret debug output uses redaction and does not expose raw secret values.
 - The SDK reuses one `reqwest::Client` per `KisClient` and caches issued bearer tokens in memory until the configured refresh skew.
